@@ -9,6 +9,19 @@ This Ansible role configures a Raspberry Pi (tested on Pi 5 with Raspberry Pi OS
 - Optional internal DNS + DHCP server (bind9 + isc-dhcp-server)
   - Supports DNS-over-TLS (DoT) with upstream resolvers (1.1.1.1 and 8.8.8.8) via Stubby
 
+## Hardware Requirements
+
+This project has been tested using:
+
+- Raspberry Pi 5 (8GB RAM, but **4GB RAM minimum** is recommended)
+- PCIe to MiniPCIe / Gigabit Ethernet / USB 3.2 Gen1 HAT for Raspberry Pi 5 (for dual Ethernet capability)
+- A MiniPCIe slot is available and will support a WiFi card in the future (planned feature).
+
+Future improvements will include:
+- WiFi card support for the MiniPCIe slot
+- BMX7 mesh networking integration
+- Remote monitoring via Grafana Alloy agent, shipping logs and metrics to a central Loki+Grafana instance (e.g., on GCP)
+
 ## Features
 
 - ✅ Tailscale exit node + subnet routing
@@ -17,6 +30,7 @@ This Ansible role configures a Raspberry Pi (tested on Pi 5 with Raspberry Pi OS
 - ✅ Cleans conflicting services (`systemd-resolved`, `dnsmasq`) automatically
 - ✅ Secure DNS-over-TLS (DoT) via Stubby even for simple mode
 - ✅ Designed for self-hosters, developers, and tinkerers
+- ✅ Future support for centralized monitoring and alerting
 
 ## Usage
 
@@ -89,6 +103,9 @@ When `use_internal_dns_dhcp: false`, additionally:
 ## To Do
 - [ ] Add validation playbook
 - [ ] Add automatic tests
+- [ ] Integrate optional WiFi support for MiniPCIe card
+- [ ] Integrate BMX7 for mesh networking
+- [ ] Implement Alloy agent for remote logging to centralized Loki instance
 
 ---
 
@@ -121,5 +138,4 @@ Maintained with ❤️ by a sysadmin who misses running their own mail server.
 │           └── named.conf.options.j2
 ├── .gitignore
 └── README.md
-```
 ```
