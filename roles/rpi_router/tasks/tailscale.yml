@@ -1,0 +1,25 @@
+---
+- name: Install Tailscale (via apt preferred)
+  apt:
+    name: tailscale
+    state: present
+    update_cache: yes
+
+- name: Ensure Tailscale service is enabled and started
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: yes
+    state: started
+
+- name: Check if Tailscale is already up
+  shell: tailscale status
+  register: tailscale_status
+  ignore_errors: true
+
+- name: Bring up Tailscale with Exit Node, Subnet Routing, and Authkey if not connected
+  shell: |
+    tailscale up --authkey {{ tailscale_authkey }} --advertise-exit-node --advertise-routes={{ lan_cidr }}
+  when: "'NoState' in tailscale_status.stdout or 'stopped' in tailscale_status.stdout or tailscale_status.rc != 0"
+  args:
+    executable: /bin/bash
+

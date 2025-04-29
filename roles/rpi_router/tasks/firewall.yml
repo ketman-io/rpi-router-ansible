@@ -1,0 +1,43 @@
+---
+- name: Install iptables if needed
+  apt:
+    name: iptables
+    state: present
+    update_cache: yes
+
+- name: Install iptables-persistent to save rules across reboots
+  apt:
+    name: iptables-persistent
+    state: present
+    update_cache: yes
+
+- name: Setup NAT masquerading (LAN to WAN)
+  iptables:
+    table: nat
+    chain: POSTROUTING
+    out_interface: "{{ wan_iface }}"
+    jump: MASQUERADE
+
+- name: Redirect all DNS (UDP) traffic to internal DoT server
+  iptables:
+    table: nat
+    chain: PREROUTING
+    protocol: udp
+    destination_port: 53
+    in_interface: "{{ lan_iface }}"
+    jump: DNAT
+    to_destination: "{{ dns_server }}:53"
+
+- name: Redirect all DNS (TCP) traffic to internal DoT server
+  iptables:
+    table: nat
+    chain: PREROUTING
+    protocol: tcp
+    destination_port: 53
+    in_interface: "{{ lan_iface }}"
+    jump: DNAT
+    to_destination: "{{ dns_server }}:53"
+
+- name: Save current iptables rules (IPv4)
+  shell: iptables-save > /etc/iptables/rules.v4
+

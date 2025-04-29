@@ -1,0 +1,16 @@
+- name: Install iptables
+  apt:
+    name: iptables-persistent
+    state: present
+    update_cache: yes
+
+- name: Setup NAT masquerading
+  iptables:
+    table: nat
+    chain: POSTROUTING
+    out_interface: "{{ wan_iface }}"
+    jump: MASQUERADE
+
+- name: Save iptables rules
+  command: iptables-save > /etc/iptables/rules.v4
+

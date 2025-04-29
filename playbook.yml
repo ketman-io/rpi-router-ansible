@@ -1,0 +1,6 @@
+- name: Configure Raspberry Pi Router
+  hosts: rpi_routers
+  become: true
+  roles:
+    - rpi_router
+

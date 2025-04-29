@@ -1,0 +1,41 @@
+---
+- name: Install NetworkManager if missing
+  apt:
+    name: network-manager
+    state: present
+    update_cache: yes
+
+- name: Check if LAN connection exists
+  shell: nmcli -g NAME con show
+  register: nmcli_connections
+
+- name: Create LAN static connection if missing
+  shell: |
+    nmcli con add type ethernet ifname {{ lan_iface }} con-name lan autoconnect yes ip4 {{ lan_ip }}/{{ lan_prefix }}
+  when: "'lan' not in nmcli_connections.stdout_lines"
+
+- name: Set LAN DNS server
+  shell: |
+    current_dns=$(nmcli -g ipv4.dns con show lan)
+    if [ "$current_dns" != "{{ dns_server }}" ]; then
+      nmcli con mod lan ipv4.dns {{ dns_server }}
+    fi
+  args:
+    executable: /bin/bash
+  notify: Restart networking
+
+- name: Check if WAN connection exists
+  shell: nmcli -g NAME con show
+  register: nmcli_connections_again
+
+- name: Create WAN DHCP connection if missing
+  shell: |
+    nmcli con add type ethernet ifname {{ wan_iface }} con-name wan autoconnect yes
+  when: "'wan' not in nmcli_connections_again.stdout_lines"
+
+- name: Bring up LAN connection
+  shell: nmcli con up lan
+
+- name: Bring up WAN connection
+  shell: nmcli con up wan
+

@@ -1,0 +1,13 @@
+---
+- name: Confirm that rpi_router role is executing
+  debug:
+    msg: "Inside rpi_router role!"
+
+- name: Configure Debian-based RPi as a router
+  include_tasks: interfaces_nmcli.yml
+- include_tasks: ip_forwarding.yml
+- include_tasks: firewall.yml
+- include_tasks: dns_dhcp.yml
+- include_tasks: tailscale.yml
+# - include_tasks: bmx7.yml  # Optional for now
+

@@ -1,0 +1,13 @@
+# /etc/network/interfaces
+
+auto lo
+iface lo inet loopback
+
+auto {{ lan_iface }}
+iface {{ lan_iface }} inet static
+    address {{ lan_ip }}
+    netmask {{ lan_netmask }}
+
+auto {{ wan_iface }}
+iface {{ wan_iface }} inet dhcp
+

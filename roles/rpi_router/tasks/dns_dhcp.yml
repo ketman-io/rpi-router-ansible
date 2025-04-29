@@ -1,0 +1,20 @@
+---
+- name: Ensure dnsmasq is not installed
+  apt:
+    name: dnsmasq
+    state: absent
+
+- name: Disable systemd-resolved if running
+  systemd:
+    name: systemd-resolved
+    enabled: no
+    state: stopped
+  ignore_errors: yes
+  when: ansible_facts.services['systemd-resolved'] is defined
+
+- name: Configure DHCP client to use external DNS server
+  copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ dns_server }}
+
