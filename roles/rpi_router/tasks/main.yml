@@ -1,13 +1,24 @@
 ---
-- name: Confirm that rpi_router role is executing
-  debug:
-    msg: "Inside rpi_router role!"
-
-- name: Configure Debian-based RPi as a router
+- name: Configure networking interfaces
   include_tasks: interfaces_nmcli.yml
-- include_tasks: ip_forwarding.yml
-- include_tasks: firewall.yml
-- include_tasks: dns_dhcp.yml
-- include_tasks: tailscale.yml
-# - include_tasks: bmx7.yml  # Optional for now
+
+- name: Enable IP forwarding
+  include_tasks: ip_forwarding.yml
+
+- name: Set up firewall (NAT, DNS redirect, etc.)
+  include_tasks: firewall.yml
+
+- name: Disable systemd-resolved and configure resolv.conf
+  include_tasks: systemd_dns_cleanup.yml
+
+- name: Optionally configure internal DNS and DHCP
+  include_tasks: dns_dhcp.yml
+  when: not use_internal_dns_dhcp
+
+- name: Install and configure stubby for encrypted DNS
+  include_tasks: stubby.yml
+  when: not use_internal_dns_dhcp
+
+- name: Set up Tailscale
+  include_tasks: tailscale.yml
 

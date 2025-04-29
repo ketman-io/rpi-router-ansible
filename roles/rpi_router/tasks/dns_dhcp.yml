@@ -4,6 +4,14 @@
     name: dnsmasq
     state: absent
 
+- name: Install bind9 and isc-dhcp-server
+  apt:
+    name:
+      - bind9
+      - isc-dhcp-server
+    state: present
+    update_cache: yes
+
 - name: Disable systemd-resolved if running
   systemd:
     name: systemd-resolved
@@ -12,9 +20,33 @@
   ignore_errors: yes
   when: ansible_facts.services['systemd-resolved'] is defined
 
-- name: Configure DHCP client to use external DNS server
+- name: Deploy resolv.conf pointing to localhost
   copy:
     dest: /etc/resolv.conf
     content: |
-      nameserver {{ dns_server }}
+      nameserver 127.0.0.1
+
+- name: Deploy named.conf.options for DoT upstream
+  template:
+    src: named.conf.options.j2
+    dest: /etc/bind/named.conf.options
+    mode: '0644'
+
+- name: Deploy DHCP server configuration
+  template:
+    src: dhcpd.conf.j2
+    dest: /etc/dhcp/dhcpd.conf
+    mode: '0644'
+
+- name: Ensure bind9 service is running
+  systemd:
+    name: bind9
+    enabled: yes
+    state: restarted
+
+- name: Ensure isc-dhcp-server service is running
+  systemd:
+    name: isc-dhcp-server
+    enabled: yes
+    state: restarted
 

@@ -1,0 +1,16 @@
+---
+- name: Disable systemd-resolved if running
+  systemd:
+    name: systemd-resolved
+    enabled: no
+    state: stopped
+  ignore_errors: yes
+  when: ansible_facts.services['systemd-resolved'] is defined
+
+- name: Replace resolv.conf with internal DNS pointer
+  copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ dns_server }}
+    mode: '0644'
+

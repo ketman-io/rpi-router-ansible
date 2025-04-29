@@ -1,0 +1,33 @@
+---
+- name: Install stubby
+  apt:
+    name: stubby
+    state: present
+    update_cache: yes
+
+- name: Deploy stubby configuration
+  copy:
+    dest: /etc/stubby/stubby.yml
+    content: |
+      resolution_type: GETDNS_RESOLUTION_STUB
+      dns_transport_list:
+        - GETDNS_TRANSPORT_TLS
+      tls_authentication: GETDNS_AUTHENTICATION_REQUIRED
+      tls_query_padding_blocksize: 128
+      edns_client_subnet_private: 1
+      idle_timeout: 10000
+      listen_addresses:
+        - 127.0.0.1@8053
+      round_robin_upstreams: 1
+      upstream_recursive_servers:
+        - address_data: 1.1.1.1
+          tls_auth_name: "cloudflare-dns.com"
+        - address_data: 8.8.8.8
+          tls_auth_name: "dns.google"
+
+- name: Restart stubby service
+  systemd:
+    name: stubby
+    enabled: yes
+    state: restarted
+

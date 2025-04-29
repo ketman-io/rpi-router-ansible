@@ -1,0 +1,19 @@
+options {
+    directory "/var/cache/bind";
+
+    forwarders {
+        127.0.0.1 port 8053;
+    };
+
+    dnssec-validation auto;
+
+    listen-on { any; };
+    allow-query { any; };
+
+    # DNS-over-TLS upstream
+    forward only;
+
+    # Optional DoT port config (if bind9 is compiled with DoT)
+    # tls-ca-file "/etc/ssl/certs/ca-certificates.crt";
+};
+
