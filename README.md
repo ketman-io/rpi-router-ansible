@@ -59,6 +59,8 @@ Create a secrets file (not committed):
 tailscale_authkey: tskey-XXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
+Edit the inventory.ini and set the IP address of your router you are configuring
+
 And add to `.gitignore`:
 ```bash
 echo "secrets.yml" >> .gitignore
