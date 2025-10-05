@@ -36,7 +36,7 @@ Future improvements will include:
 
 ### 1. Clone and set up
 ```bash
-git clone https://github.com/YOURUSER/rpi-router-ansible.git
+git clone https://github.com/ketman-io/rpi-router-ansible.git
 cd rpi-router-ansible
 ```
 
