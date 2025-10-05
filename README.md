@@ -46,10 +46,10 @@ Edit `group_vars/rpi_routers.yml`:
 ```yaml
 lan_iface: eth0
 wan_iface: eth1
-lan_ip: 192.168.9.1
+lan_ip: 192.168.<0.255>.1
 lan_prefix: 21
-lan_cidr: 192.168.8.0/21
-dns_server: 192.168.9.31
+lan_cidr: 192.168.<0.255>.0/24
+dns_server: 192.168.<X.X>
 use_internal_dns_dhcp: true  # or false for simple router mode
 ```
 
