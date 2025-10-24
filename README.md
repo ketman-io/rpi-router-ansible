@@ -13,9 +13,9 @@ This Ansible role configures a Raspberry Pi (tested on Pi 5 with Raspberry Pi OS
 
 This project has been tested using:
 
-- Raspberry Pi 5 (8GB RAM, but **4GB RAM minimum** is recommended)
-- PCIe to MiniPCIe / Gigabit Ethernet / USB 3.2 Gen1 HAT for Raspberry Pi 5 (for dual Ethernet capability)
-- A MiniPCIe slot is available and will support a WiFi card in the future (planned feature).
+- Raspberry Pi 5 (8GB RAM is recommended, **4GB RAM minimum**)
+- PCIe to MiniPCIe / Gigabit Ethernet / USB 3.2 Gen1 HAT for Raspberry Pi 5 (for dual Ethernet capability) [WaveShare](https://www.waveshare.com/product/raspberry-pi/hats/interface-power/pcie-to-4g-5g-m.2-usb3.2-hat-plus.htm)
+- A MiniPCIe slot is available and will support a WiFi card in the future (planned feature).Ex. [WLE900VZ](https://compex.com.sg/shop/wifi-module/802-11ac-wave-1/wle900vx-wifi5-11ac-qca9880-qca9890/)
 
 Future improvements will include:
 - WiFi card support for the MiniPCIe slot
