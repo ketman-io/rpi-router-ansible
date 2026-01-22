@@ -1,4 +1,15 @@
 ---
+# Backwards-compatible flags: if internal_* not set, derive from use_internal_dns_dhcp
+- name: Derive internal DNS flag (backwards compatible)
+  set_fact:
+    internal_dns_enabled: "{{ not use_internal_dns_dhcp | default(false) }}"
+  when: internal_dns_enabled is not defined
+
+- name: Derive internal DHCP flag (backwards compatible)
+  set_fact:
+    internal_dhcp_enabled: "{{ not use_internal_dns_dhcp | default(false) }}"
+  when: internal_dhcp_enabled is not defined
+
 - name: Configure networking interfaces
   include_tasks: interfaces_nmcli.yml
 
@@ -8,17 +19,18 @@
 - name: Set up firewall (NAT, DNS redirect, etc.)
   include_tasks: firewall.yml
 
-- name: Disable systemd-resolved and configure resolv.conf
-  include_tasks: systemd_dns_cleanup.yml
-
-- name: Optionally configure internal DNS and DHCP
+# IMPORTANT: install DNS/DHCP while system DNS still works
+- name: Optionally configure internal DNS and/or DHCP
   include_tasks: dns_dhcp.yml
-  when: not use_internal_dns_dhcp
+  when: internal_dns_enabled or internal_dhcp_enabled
 
 - name: Install and configure stubby for encrypted DNS
   include_tasks: stubby.yml
-  when: not use_internal_dns_dhcp
+  when: internal_dns_enabled
+
+# ONLY NOW: kill systemd-resolved and finalize resolv.conf
+- name: Disable systemd-resolved and configure resolv.conf
+  include_tasks: systemd_dns_cleanup.yml
 
 - name: Set up Tailscale
   include_tasks: tailscale.yml
-
