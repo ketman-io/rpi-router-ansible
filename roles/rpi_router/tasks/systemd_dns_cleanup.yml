@@ -5,12 +5,11 @@
     enabled: no
     state: stopped
   ignore_errors: yes
-  when: ansible_facts.services['systemd-resolved'] is defined
 
-- name: Replace resolv.conf with internal DNS pointer
+- name: Replace resolv.conf with external DNS pointer
   copy:
     dest: /etc/resolv.conf
     content: |
       nameserver {{ dns_server }}
     mode: '0644'
-
+  when: not (internal_dns_enabled | default(false))
