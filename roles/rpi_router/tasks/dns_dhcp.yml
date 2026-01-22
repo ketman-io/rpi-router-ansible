@@ -3,50 +3,55 @@
   apt:
     name: dnsmasq
     state: absent
+  when: internal_dns_enabled or internal_dhcp_enabled
 
-- name: Install bind9 and isc-dhcp-server
+- name: Install bind9 (for internal DNS)
   apt:
-    name:
-      - bind9
-      - isc-dhcp-server
+    name: bind9
     state: present
     update_cache: yes
+  when: internal_dns_enabled
 
-- name: Disable systemd-resolved if running
-  systemd:
-    name: systemd-resolved
-    enabled: no
-    state: stopped
-  ignore_errors: yes
-  when: ansible_facts.services['systemd-resolved'] is defined
-
-- name: Deploy resolv.conf pointing to localhost
-  copy:
-    dest: /etc/resolv.conf
-    content: |
-      nameserver 127.0.0.1
+- name: Install isc-dhcp-server (for internal DHCP)
+  apt:
+    name: isc-dhcp-server
+    state: present
+    update_cache: yes
+  when: internal_dhcp_enabled
 
 - name: Deploy named.conf.options for DoT upstream
   template:
     src: named.conf.options.j2
     dest: /etc/bind/named.conf.options
     mode: '0644'
+  when: internal_dns_enabled
 
 - name: Deploy DHCP server configuration
   template:
     src: dhcpd.conf.j2
     dest: /etc/dhcp/dhcpd.conf
     mode: '0644'
+  when: internal_dhcp_enabled
 
 - name: Ensure bind9 service is running
   systemd:
     name: bind9
     enabled: yes
-    state: restarted
+    state: started
+  when: internal_dns_enabled
 
 - name: Ensure isc-dhcp-server service is running
   systemd:
     name: isc-dhcp-server
     enabled: yes
-    state: restarted
+    state: started
+  when: internal_dhcp_enabled
 
+# Now that bind9 exists, point the Pi itself at localhost in the internal DNS case
+- name: Deploy resolv.conf pointing to localhost (bind9)
+  copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver 127.0.0.1
+    mode: '0644'
+  when: internal_dns_enabled
