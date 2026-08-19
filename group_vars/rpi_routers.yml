@@ -1,8 +1,26 @@
 lan_iface: eth0
 wan_iface: eth1
 lan_ip: 192.168.<0-255>.1
-lan_netmask: 255.255.248.0
-lan_prefix: 21
+lan_prefix: 24
+lan_netmask: 255.255.255.0
 lan_cidr: 192.168.<0-255>.0/24
 dns_server: 192.168.<X.X>
 use_internal_dns_dhcp: true   # or false to have DoT DNS and DHCP handled by the router
+
+# DNS-over-TLS upstream, used only when the router runs its own bind9
+# (use_internal_dns_dhcp: false). All addresses in dns_upstream_addresses must
+# belong to the SAME provider/certificate name as dns_upstream_tls_name — BIND
+# validates the TLS certificate against that one name for every address in the
+# list. To use a different provider, change both together. Example values
+# below (Cloudflare); Quad9 (9.9.9.9 / 149.112.112.112, "dns.quad9.net") and
+# Google (8.8.8.8 / 8.8.4.4, "dns.google") are common alternatives.
+dns_upstream_tls_name: cloudflare-dns.com
+dns_upstream_addresses:
+  - 1.1.1.1
+  - 1.0.0.1
+
+# Networks allowed to query/recurse through this resolver. Defaults to the
+# router's own LAN; add other CIDRs (e.g. a Tailscale range) here rather than
+# widening this to "any" — an open resolver is not a router feature.
+dns_client_cidrs:
+  - "{{ lan_cidr }}"

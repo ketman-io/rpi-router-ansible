@@ -2,10 +2,10 @@ default-lease-time 600;
 max-lease-time 7200;
 authoritative;
 
-subnet {{ lan_cidr.split('.')[0] }}.{{ lan_cidr.split('.')[1] }}.{{ lan_cidr.split('.')[2] }}.0 netmask 255.255.248.0 {
-    range 192.168.9.100 192.168.9.200;
+{% set lan_octets = lan_ip.split('.')[0:3] | join('.') %}
+subnet {{ lan_cidr.split('.')[0] }}.{{ lan_cidr.split('.')[1] }}.{{ lan_cidr.split('.')[2] }}.0 netmask {{ lan_netmask }} {
+    range {{ lan_octets }}.100 {{ lan_octets }}.200;
     option routers {{ lan_ip }};
-    option subnet-mask 255.255.248.0;
+    option subnet-mask {{ lan_netmask }};
     option domain-name-servers {{ lan_ip }};
 }
-

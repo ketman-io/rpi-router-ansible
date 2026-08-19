@@ -1,19 +1,34 @@
-options {
-    directory "/var/cache/bind";
-
-    forwarders {
-        127.0.0.1 port 8053;
-    };
-
-    dnssec-validation auto;
-
-    listen-on { any; };
-    allow-query { any; };
-
-    # DNS-over-TLS upstream
-    forward only;
-
-    # Optional DoT port config (if bind9 is compiled with DoT)
-    # tls-ca-file "/etc/ssl/certs/ca-certificates.crt";
+// Native BIND DNS-over-TLS. Requires bind9 9.18+ (Debian/Raspberry Pi OS
+// Trixie ships 9.20) — no separate DoT proxy (Stubby or otherwise) needed
+// or wanted. See dns_upstream_tls_name / dns_upstream_addresses in
+// group_vars for how to point this at a different provider.
+tls dot-upstream {
+    remote-hostname "{{ dns_upstream_tls_name }}";
 };
 
+options {
+    directory "/var/cache/bind";
+    auth-nxdomain no;
+
+    // "any" is an open resolver. Restrict to the LAN this box actually
+    // serves, plus loopback for the router itself.
+    listen-on { 127.0.0.1; {{ lan_ip }}; };
+    listen-on-v6 { none; };
+    allow-query { localhost;{% for cidr in dns_client_cidrs %} {{ cidr }};{% endfor %} };
+    allow-recursion { localhost;{% for cidr in dns_client_cidrs %} {{ cidr }};{% endfor %} };
+    allow-transfer { none; };
+
+    recursion yes;
+    minimal-responses yes;
+    dnssec-validation auto;
+    version "not-disclosed";
+
+    forward only;
+    forwarders port 853 tls dot-upstream {
+{% for address in dns_upstream_addresses %}        {{ address }};
+{% endfor %}    };
+};
+
+logging {
+    category lame-servers { null; };
+};

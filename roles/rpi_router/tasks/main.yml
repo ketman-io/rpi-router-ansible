@@ -20,13 +20,13 @@
   include_tasks: firewall.yml
 
 # IMPORTANT: install DNS/DHCP while system DNS still works
+#
+# DNS-over-TLS is BIND itself, not a separate proxy: bind9 9.18+ (Trixie
+# ships 9.20) forwards natively over TLS via a `tls` clause and `forwarders
+# port 853 tls`. There is no Stubby step here any more — see named.conf.options.j2.
 - name: Optionally configure internal DNS and/or DHCP
   include_tasks: dns_dhcp.yml
   when: internal_dns_enabled or internal_dhcp_enabled
-
-- name: Install and configure stubby for encrypted DNS
-  include_tasks: stubby.yml
-  when: internal_dns_enabled
 
 # ONLY NOW: kill systemd-resolved and finalize resolv.conf
 - name: Disable systemd-resolved and configure resolv.conf

@@ -1,13 +1,13 @@
 # Raspberry Pi Router with Tailscale and Optional Internal DNS/DHCP
 
-This Ansible role configures a Raspberry Pi (tested on Pi 5 with Raspberry Pi OS Bookworm) as a full-featured router with:
+This Ansible role configures a Raspberry Pi (tested on Pi 5 with Raspberry Pi OS Trixie/Debian 13) as a full-featured router with:
 
 - Static IP on LAN interface
 - DHCP client on WAN
 - NAT routing
 - Tailscale (Exit Node + Subnet Router)
 - Optional internal DNS + DHCP server (bind9 + isc-dhcp-server)
-  - Supports DNS-over-TLS (DoT) with upstream resolvers (1.1.1.1 and 8.8.8.8) via Stubby
+  - DNS-over-TLS (DoT) to an upstream resolver, via bind9's own native DoT forwarding (9.18+) — **no Stubby or other separate DoT proxy**. See `dns_upstream_tls_name` / `dns_upstream_addresses` in `group_vars/rpi_routers.yml`.
 
 ## Hardware Requirements
 
@@ -28,7 +28,7 @@ Future improvements will include:
 - ✅ Optional use of internal DNS-over-TLS + DHCP
 - ✅ Full Ansible-driven setup — repeatable, idempotent
 - ✅ Cleans conflicting services (`systemd-resolved`, `dnsmasq`) automatically
-- ✅ Secure DNS-over-TLS (DoT) via Stubby even for simple mode
+- ✅ Secure DNS-over-TLS (DoT) via bind9's native forwarder, even in simple mode
 - ✅ Designed for self-hosters, developers, and tinkerers
 - ✅ Future support for centralized monitoring and alerting
 
@@ -46,12 +46,23 @@ Edit `group_vars/rpi_routers.yml`:
 ```yaml
 lan_iface: eth0
 wan_iface: eth1
-lan_ip: 192.168.<0.255>.1
-lan_prefix: 21
-lan_cidr: 192.168.<0.255>.0/24
+lan_ip: 192.168.<0-255>.1
+lan_prefix: 24
+lan_netmask: 255.255.255.0
+lan_cidr: 192.168.<0-255>.0/24
 dns_server: 192.168.<X.X>
 use_internal_dns_dhcp: true  # or false for simple router mode
+
+# Only used in simple mode (use_internal_dns_dhcp: false) — see
+# group_vars/rpi_routers.yml for the full set and defaults.
+dns_upstream_tls_name: cloudflare-dns.com
+dns_upstream_addresses: [1.1.1.1, 1.0.0.1]
+dns_client_cidrs: ["{{ lan_cidr }}"]
 ```
+
+`lan_prefix` and `lan_netmask` must describe the same network — they are not
+derived from each other. If your LAN is not a plain /24, set both explicitly
+(e.g. a /21: `lan_prefix: 21`, `lan_netmask: 255.255.248.0`).
 
 Create a secrets file (not committed):
 ```yaml
@@ -82,7 +93,10 @@ ansible-playbook -i inventory.ini playbook.yml --extra-vars="@secrets.yml"
 ### Simple mode (`use_internal_dns_dhcp: false`)
 - Pi router installs and configures bind9 and isc-dhcp-server automatically.
 - Pi acts as the DHCP server for the network.
-- Pi acts as the DNS server, forwarding all queries securely to Cloudflare (1.1.1.1) and Google DNS (8.8.8.8) **via Stubby using DNS-over-TLS**.
+- Pi acts as the DNS server, forwarding all queries over DNS-over-TLS to the
+  provider configured in `dns_upstream_tls_name` / `dns_upstream_addresses`
+  (Cloudflare by default) — **directly, via bind9's own native DoT
+  forwarder**. No separate proxy process is installed or required.
 - No need for an external DNS/DHCP server.
 
 ## Internal DHCP/DNS Details
@@ -92,14 +106,23 @@ Regardless of mode:
 - `/etc/resolv.conf` is configured to use the defined internal DNS server.
 
 When `use_internal_dns_dhcp: false`, additionally:
-- The router leases addresses in the 192.168.9.100-192.168.9.200 range.
-- Assigns itself (192.168.9.1) as the gateway and DNS server to clients.
+- The router leases addresses in a `.100`–`.200` range on `lan_ip`'s own
+  /24, derived from `lan_ip` and `lan_netmask` — not hard-coded to any one
+  network. Set `lan_ip`, `lan_cidr`, `lan_prefix` and `lan_netmask` together
+  to match your actual LAN; they must agree with each other.
+- Assigns itself (`lan_ip`) as the gateway and DNS server to clients.
 - Installs and manages bind9 and isc-dhcp-server.
-- Installs and configures Stubby to securely forward DNS-over-TLS to upstream providers.
+- bind9 forwards recursive queries over native DNS-over-TLS; nothing else is
+  installed to do this.
 - Cleans up any conflicting services like `dnsmasq`.
+- `allow-query`/`allow-recursion` are restricted to `dns_client_cidrs`
+  (defaults to your own LAN), not the whole internet.
 
 ## Dependencies
-- Raspberry Pi OS Bookworm (Debian 12 base)
+- Raspberry Pi OS Trixie (Debian 13) with bind9 9.18+ for native DNS-over-TLS
+  forwarding (Trixie ships 9.20). Older releases (Bookworm/Debian 12, bind9
+  9.18) also support native DoT; anything with bind9 < 9.18 does not, and
+  this role does not fall back to a proxy for it.
 - Ansible 2.10+
 
 ## To Do
@@ -107,7 +130,27 @@ When `use_internal_dns_dhcp: false`, additionally:
 - [ ] Add automatic tests
 - [ ] Integrate optional WiFi support for MiniPCIe card
 - [ ] Integrate BMX7 for mesh networking
-- [ ] Implement Alloy agent for remote logging to centralized Loki instance
+
+## Relationship to Fleet
+
+Some routers built from this role are also managed by
+[KetmanIO/fleet](https://github.com/KetmanIO/fleet), a private inventory and
+convergence tool. Where both are in play, the boundary is:
+
+- **This repo** owns deterministic router functionality: BIND, DHCP,
+  NAT/routing, and the Tailscale router behaviour above. Generic, no
+  environment-specific data — real IPs, TSIG keys, passwords, and site
+  topology belong in a private `group_vars`/inventory override, never here.
+- **Fleet** owns host identity, site/criticality metadata, secrets storage
+  (TSIG keys, recovery passwords), central logging, and health/observation —
+  and, on a Fleet-managed host, it may run its own equivalent BIND role
+  (`roles/dns-primary`, `roles/dns-resolver` in the fleet repo) instead of
+  this one, so there is one config-management system per file, not two
+  fighting over the same paths.
+
+Do not run both this role's `dns_dhcp.yml`/`named.conf.options.j2` and
+Fleet's `dns-primary`/`dns-resolver` roles against the same files on the same
+host — pick one owner per machine.
 
 ---
 
@@ -133,7 +176,6 @@ Maintained with ❤️ by a sysadmin who misses running their own mail server.
 │       │   ├── firewall.yml
 │       │   ├── systemd_dns_cleanup.yml
 │       │   ├── dns_dhcp.yml
-│       │   ├── stubby.yml
 │       │   └── tailscale.yml
 │       └── templates/
 │           ├── dhcpd.conf.j2
