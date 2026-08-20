@@ -38,9 +38,13 @@
 - name: Enable IP forwarding
   ansible.builtin.import_tasks: ip_forwarding.yml
 
-- name: Configure the router's own DNS resolution
-  ansible.builtin.import_tasks: resolv.yml
-
+# DNS/DHCP is installed BEFORE this role touches the router's own DNS
+# resolution (resolv.yml, below) — not after. dhcp_dns mode points this
+# router's own /etc/resolv.conf at 127.0.0.1; doing that before bind9 is
+# even installed would break the apt install of bind9 itself, which still
+# needs working DNS to reach the package mirror. Caught in review while
+# reconciling this role with independent upstream work that had already
+# found the same ordering bug.
 - name: Run this Pi's own DHCP/DNS service
   ansible.builtin.import_tasks: dns_dhcp.yml
   when: router_mode == 'dhcp_dns'
@@ -48,6 +52,9 @@
 - name: Redirect LAN DNS traffic to an existing resolver
   ansible.builtin.import_tasks: dns_redirect.yml
   when: router_mode == 'dns_redirect'
+
+- name: Configure the router's own DNS resolution
+  ansible.builtin.import_tasks: resolv.yml
 
 - name: Configure nftables firewall (NAT, forwarding, DNS redirect)
   ansible.builtin.import_tasks: firewall.yml

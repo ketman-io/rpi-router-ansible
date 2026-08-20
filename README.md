@@ -153,6 +153,28 @@ Short version: the Pi 5's external PCIe slot is off by default;
 card's interfaces exist — the role tells you when it just made that change
 rather than rebooting on its own.
 
+## Relationship to Fleet
+
+Some routers built with this role are also managed by
+[KetmanIO/fleet](https://github.com/KetmanIO/fleet), a private inventory and
+convergence tool. The boundary is deliberate:
+
+- **This repo** owns deterministic router functionality — interfaces,
+  firewall, DHCP/DNS, Tailscale — and stays generic. No real IPs, TSIG keys,
+  passwords, hostnames, or site topology belong here; those arrive as
+  variables from whoever calls this role.
+- **Fleet** owns host identity, site/criticality metadata, secrets storage,
+  central logging, and health/observation. It includes this repository as a
+  git submodule and calls this role directly (its own `roles/router` is a
+  thin delegate that sets `manage_tailscale: false` when Fleet's own
+  `tailscale` role already owns enrolment) rather than re-implementing
+  router behaviour a second time.
+- On a host where Fleet also runs its own `dns-primary`/`dns-resolver`
+  BIND roles for a *different* purpose (e.g. this same Pi is also the
+  site's authoritative DNS server, not just its router), pick one owner per
+  config file. Do not point two independently-converging roles at
+  `/etc/bind/named.conf.options` on the same host.
+
 ## Upgrading from older versions
 
 This version replaces:
