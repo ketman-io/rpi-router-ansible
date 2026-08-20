@@ -1,0 +1,100 @@
+#!/usr/sbin/nft -f
+# Managed by rpi_router (Ansible). Do not hand-edit — changes are overwritten
+# on the next run. To change this ruleset, change the role's variables.
+#
+# Design:
+#   - one `table inet filter`, covering IPv4 and IPv6 together, so there is
+#     one ruleset to reason about rather than four (ip/ip6 x filter/whatever).
+#   - a separate `table ip nat` for masquerade and (only in dns_redirect mode)
+#     the DNS-redirect DNAT rule. NAT has no IPv6 equivalent here: this
+#     router does not masquerade IPv6, it only forwards it.
+#   - default-drop on input and forward. Nothing on WAN is reachable that is
+#     not explicitly allowed here.
+#
+# Tailscale coexistence: tailscaled detects nftables and manages its own
+# top-level tables/chains independently of this file — it is not something
+# this ruleset needs to special-case, EXCEPT that this ruleset's own
+# default-drop chains run at the standard `filter` priority (0) and would
+# drop tailscale0 traffic before tailscale's own chains ever saw it if this
+# file did not explicitly accept that interface itself. That is what the
+# `tailscale0` rules below are for — they are this role staying out of
+# tailscale's way, not an attempt to manage tailscale's own filtering.
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iifname "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        # ICMP/ICMPv6 essentials — path MTU discovery, neighbour discovery,
+        # router solicitation. Without these IPv6 in particular breaks in
+        # confusing ways.
+        icmpv6 type { destination-unreachable, packet-too-big, time-exceeded,
+                       parameter-problem, nd-router-solicit, nd-router-advert,
+                       nd-neighbor-solicit, nd-neighbor-advert } accept
+        icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
+        icmp type echo-request limit rate 10/second accept
+
+        # Tailscale's own tunnel interface. Trusted: tailscale already
+        # authenticates and encrypts at its own layer before anything
+        # reaches this host's IP stack.
+        iifname "tailscale0" accept
+
+{% if tailscale_allow_wan_udp | bool %}
+        # Optional: help tailscale find a direct (non-DERP-relayed) path.
+        # Off by default — see defaults/main.yml.
+        iifname "{{ wan_iface }}" udp dport {{ tailscale_udp_port }} accept
+{% endif %}
+
+        # Router services reachable from the LAN only, never from WAN.
+        iifname "{{ lan_bridge }}" tcp dport 22 accept
+        iifname "{{ lan_bridge }}" udp dport 22 accept
+{% if router_mode == 'dhcp_dns' %}
+        iifname "{{ lan_bridge }}" udp dport 53 accept
+        iifname "{{ lan_bridge }}" tcp dport 53 accept
+        iifname "{{ lan_bridge }}" udp dport 67 accept
+{% endif %}
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+
+        ct state established,related accept
+        ct state invalid drop
+
+        # LAN -> WAN, and the WAN's own return traffic (covered by
+        # established/related above; this line is the initial direction).
+        iifname "{{ lan_bridge }}" oifname "{{ wan_iface }}" accept
+
+        # Tailscale subnet routing / exit-node traffic in either direction.
+        iifname "tailscale0" accept
+        oifname "tailscale0" accept
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+    }
+}
+
+table ip nat {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+{% if router_mode == 'dns_redirect' %}
+        # Transparently redirect LAN-originated DNS to the real resolver,
+        # regardless of what DNS server a client is configured to use. This
+        # mirrors a common real deployment: DHCP/DNS already lives on a
+        # dedicated host, and this router's job is enforcement, not service.
+        iifname "{{ lan_bridge }}" udp dport 53 dnat to {{ dns_redirect_target }}:53
+        iifname "{{ lan_bridge }}" tcp dport 53 dnat to {{ dns_redirect_target }}:53
+{% endif %}
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        oifname "{{ wan_iface }}" masquerade
+    }
+}

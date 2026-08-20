@@ -1,0 +1,66 @@
+---
+# Fail fast on configuration mistakes that would otherwise show up as a
+# confusing runtime failure four tasks later — e.g. a bridge silently
+# containing the WAN port, or a DNS mode with no target to redirect to.
+
+- name: Assert router_mode is one of the supported values
+  ansible.builtin.assert:
+    that:
+      - router_mode in ['dhcp_dns', 'dns_redirect', 'passthrough']
+    fail_msg: >-
+      router_mode must be one of dhcp_dns, dns_redirect, passthrough
+      (got '{{ router_mode }}').
+
+- name: Assert dns_redirect_target is set when router_mode is dns_redirect
+  ansible.builtin.assert:
+    that:
+      - dns_redirect_target | length > 0
+    fail_msg: >-
+      router_mode is dns_redirect but dns_redirect_target is empty. Set it
+      to the address of the resolver LAN clients should actually reach.
+  when: router_mode == 'dns_redirect'
+
+- name: Assert lan_ifaces is a non-empty list
+  ansible.builtin.assert:
+    that:
+      - lan_ifaces is iterable
+      - lan_ifaces | length > 0
+    fail_msg: lan_ifaces must list at least one LAN interface.
+
+- name: Assert wan_iface is not also listed as a LAN interface
+  ansible.builtin.assert:
+    that:
+      - wan_iface not in lan_ifaces
+    fail_msg: >-
+      wan_iface ('{{ wan_iface }}') also appears in lan_ifaces. That would
+      bridge the WAN uplink into the LAN switch.
+
+- name: Assert lan_bridge does not collide with a physical interface name
+  ansible.builtin.assert:
+    that:
+      - lan_bridge != wan_iface
+      - lan_bridge not in lan_ifaces
+    fail_msg: >-
+      lan_bridge ('{{ lan_bridge }}') collides with a physical interface
+      name. Pick a distinct bridge name (default br0).
+
+- name: Assert lan_cidr looks like a network address, not a host address
+  ansible.builtin.assert:
+    that:
+      - "'/' in lan_cidr"
+      - lan_cidr != (lan_ip ~ '/' ~ lan_prefix)
+    fail_msg: >-
+      lan_cidr ('{{ lan_cidr }}') should be the LAN's network address (e.g.
+      192.168.1.0/24), not lan_ip with a prefix appended. It is used for
+      firewall matches and as the default Tailscale-advertised route, and
+      Tailscale rejects a route with host bits set.
+
+- name: Warn if the target OS is not the tested Trixie/Debian 13 generation
+  ansible.builtin.debug:
+    msg: >-
+      This role targets Raspberry Pi OS / Debian Trixie (13). Detected
+      {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+      ({{ ansible_facts.distribution_release }}). Proceeding, but package
+      names, NetworkManager behaviour and nftables persistence were only
+      verified on Trixie — see README.md.
+  when: ansible_facts.distribution_release | default('') != 'trixie'

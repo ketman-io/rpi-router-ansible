@@ -1,1 +1,4 @@
 secrets.yml
+tailscalauth.txt
+*.authkey
+*-authkey.txt

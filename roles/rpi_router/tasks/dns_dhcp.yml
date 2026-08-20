@@ -1,52 +1,79 @@
 ---
-- name: Ensure dnsmasq is not installed
-  apt:
+# router_mode: dhcp_dns — this Pi is the LAN's only DHCP/DNS server.
+# BIND forwards recursively over native DNS-over-TLS; there is no local DNS
+# proxy anywhere in the chain.
+
+- name: Ensure dnsmasq is not installed (would conflict with bind9/isc-dhcp-server)
+  ansible.builtin.apt:
     name: dnsmasq
     state: absent
+    purge: true
 
-- name: Install bind9 and isc-dhcp-server
-  apt:
+- name: Ensure Stubby is not installed
+  ansible.builtin.apt:
+    name: stubby
+    state: absent
+    purge: true
+    autoremove: true
+
+- name: Install BIND and isc-dhcp-server
+  ansible.builtin.apt:
     name:
       - bind9
+      - bind9-utils
+      - bind9-dnsutils
       - isc-dhcp-server
+      - ca-certificates
     state: present
-    update_cache: yes
 
-- name: Disable systemd-resolved if running
-  systemd:
-    name: systemd-resolved
-    enabled: no
-    state: stopped
-  ignore_errors: yes
-  when: ansible_facts.services['systemd-resolved'] is defined
-
-- name: Deploy resolv.conf pointing to localhost
-  copy:
-    dest: /etc/resolv.conf
-    content: |
-      nameserver 127.0.0.1
-
-- name: Deploy named.conf.options for DoT upstream
-  template:
+- name: Deploy named.conf.options (native DoT upstream)
+  ansible.builtin.template:
     src: named.conf.options.j2
     dest: /etc/bind/named.conf.options
-    mode: '0644'
+    owner: root
+    group: bind
+    mode: "0640"
+    backup: true
+    validate: /usr/sbin/named-checkconf %s
+  notify: reload bind9
 
-- name: Deploy DHCP server configuration
-  template:
+- name: Deploy dhcpd.conf
+  ansible.builtin.template:
     src: dhcpd.conf.j2
     dest: /etc/dhcp/dhcpd.conf
-    mode: '0644'
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+    validate: /usr/sbin/dhcpd -t -cf %s
+  notify: restart isc-dhcp-server
 
-- name: Ensure bind9 service is running
-  systemd:
-    name: bind9
-    enabled: yes
-    state: restarted
+- name: Restrict isc-dhcp-server to the LAN bridge only (never listen on WAN)
+  ansible.builtin.lineinfile:
+    path: /etc/default/isc-dhcp-server
+    regexp: '^INTERFACESv4='
+    line: 'INTERFACESv4="{{ lan_bridge }}"'
+    create: true
+  notify: restart isc-dhcp-server
 
-- name: Ensure isc-dhcp-server service is running
-  systemd:
+- name: Enable and start BIND
+  ansible.builtin.systemd_service:
+    name: named
+    enabled: true
+    state: started
+
+# named and isc-dhcp-server are never restarted in the same handler flush —
+# each service's own handler fires independently, and a validated config is
+# a precondition for either restart (the `validate:` parameters above), so a
+# bad render never reaches a running daemon.
+- name: Apply BIND changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start isc-dhcp-server
+  ansible.builtin.systemd_service:
     name: isc-dhcp-server
-    enabled: yes
-    state: restarted
+    enabled: true
+    state: started
 
+- name: Apply DHCP changes now
+  ansible.builtin.meta: flush_handlers

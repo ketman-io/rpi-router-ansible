@@ -1,11 +1,16 @@
-default-lease-time 600;
-max-lease-time 7200;
+default-lease-time {{ dhcp_default_lease_time }};
+max-lease-time {{ dhcp_max_lease_time }};
 authoritative;
 
-subnet {{ lan_cidr.split('.')[0] }}.{{ lan_cidr.split('.')[1] }}.{{ lan_cidr.split('.')[2] }}.0 netmask 255.255.248.0 {
-    range 192.168.9.100 192.168.9.200;
+# The network address and netmask come straight from lan_cidr/lan_netmask —
+# not hard-coded. A previous version of this template hard-coded
+# `netmask 255.255.248.0` and a 192.168.9.x range regardless of the site's
+# real network, which broke isc-dhcp-server outright on any site not shaped
+# like a /21 at 192.168.8.0 (confirmed: dhcpd's own self-test refused to
+# start it at all — "not the correct network for the specified netmask").
+subnet {{ lan_cidr.split('/')[0] }} netmask {{ lan_netmask }} {
+    range {{ dhcp_range_start }} {{ dhcp_range_end }};
     option routers {{ lan_ip }};
-    option subnet-mask 255.255.248.0;
+    option subnet-mask {{ lan_netmask }};
     option domain-name-servers {{ lan_ip }};
 }
-

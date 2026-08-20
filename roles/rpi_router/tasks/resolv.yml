@@ -1,0 +1,36 @@
+---
+# The router's OWN DNS resolution — not what it serves to clients, but what
+# it uses itself for outbound lookups (apt, NTP hostnames, etc). One
+# intentional path, no hidden alternate one: systemd-resolved is disabled
+# and DNS-over-WAN-DHCP is ignored, so /etc/resolv.conf always says exactly
+# what this role decided it should say.
+
+- name: Disable systemd-resolved if present
+  ansible.builtin.systemd_service:
+    name: systemd-resolved
+    enabled: false
+    state: stopped
+  failed_when: false
+  register: rpi_router_resolved_disabled
+  changed_when: rpi_router_resolved_disabled is not failed and rpi_router_resolved_disabled.changed | default(false)
+
+- name: Stop NetworkManager from taking DNS settings from WAN's DHCP lease
+  ansible.builtin.command: nmcli connection modify wan ipv4.ignore-auto-dns yes
+  changed_when: true
+
+- name: Determine this router's own resolver
+  ansible.builtin.set_fact:
+    rpi_router_own_resolver: >-
+      {{ '127.0.0.1' if router_mode == 'dhcp_dns'
+         else (dns_redirect_target if router_mode == 'dns_redirect' else '') }}
+
+- name: Point this router's own resolution at its resolver
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      # Managed by rpi_router (Ansible).
+      nameserver {{ rpi_router_own_resolver }}
+    owner: root
+    group: root
+    mode: "0644"
+  when: rpi_router_own_resolver != ''

@@ -1,0 +1,129 @@
+# Defaults for the rpi_router role.
+#
+# Everything here is generic. No real addresses, hostnames or credentials
+# belong in this file or anywhere else in this repository — see README.md.
+# Fill in real values in your own inventory/group_vars, kept outside of
+# version control (or in a private repository) if they describe a real site.
+
+# --- WAN ---
+# The interface facing the upstream ISP/router. Always DHCP.
+wan_iface: eth0
+
+# --- LAN ---
+# One or more interfaces to bridge together as the LAN switch. A single
+# interface is fine (the bridge is still created, with one slave); this is
+# what makes multi-port hardware like the Waveshare PCIE TO 4-CH 2.5G ETH
+# Board a matter of listing more interfaces, not a special code path.
+#
+# Do not assume the kernel names USB/PCIe Ethernet adapters predictably
+# (e.g. "eth1".."eth4"). Discover the real names on the target hardware first
+# — see docs/hardware-waveshare-4port.md — and list them explicitly here, or
+# by stable udev-assigned name if you have set one up.
+lan_ifaces:
+  - eth1
+
+# The bridge that owns the LAN IP configuration. Never assign lan_ip to one
+# of the slave interfaces directly.
+lan_bridge: br0
+
+# Bridge STP is off by default: this is a flat single-segment LAN switch, not
+# a network with redundant paths that need loop protection. Turn it on if
+# your topology actually has a loop.
+lan_bridge_stp: false
+
+lan_ip: 192.168.1.1
+lan_prefix: 24
+# Dotted-decimal form of lan_prefix, required by isc-dhcp-server's
+# dhcpd.conf syntax. Kept as an explicit variable rather than computed from
+# lan_prefix so this role has no dependency on the ansible.utils/netaddr
+# collection — just make sure the two agree.
+lan_netmask: 255.255.255.0
+# The LAN network in CIDR form — the network address, not lan_ip (e.g.
+# 192.168.1.0/24, not 192.168.1.1/24). Used for firewall matches and as the
+# default Tailscale-advertised route. Set this explicitly rather than
+# relying on arithmetic on lan_ip/lan_prefix: a role that gets this wrong
+# silently advertises or matches the wrong network.
+lan_cidr: 192.168.1.0/24
+
+# --- PCIe (Raspberry Pi 5 + Waveshare or similar PCIe NIC hardware) ---
+# Raspberry Pi 5 PCIe is off by default. Only needed on hardware that
+# actually has a PCIe Ethernet card; harmless to leave enabled otherwise.
+enable_pcie: true
+# Deliberately Gen2 only — see docs/hardware-waveshare-4port.md. Do not set
+# this true unless your PCIe hardware benefits from Gen3 and is validated at
+# that speed; it provides no benefit for the Waveshare board this role was
+# built against.
+pcie_gen3: false
+boot_config_path: /boot/firmware/config.txt
+
+# --- Router DNS/DHCP behaviour ---
+# One of:
+#   dhcp_dns   - this Pi runs its own isc-dhcp-server + BIND (native DoT
+#                upstream). Use when there is no other DHCP/DNS server on
+#                the LAN.
+#   dns_redirect - this Pi runs neither DHCP nor DNS. Whatever DHCP server
+#                already serves the LAN keeps doing so; this role
+#                transparently redirects LAN-originated port-53 traffic
+#                (UDP+TCP) to dns_redirect_target, so clients get the
+#                intended resolver even if they ignore the DHCP-advertised
+#                one. This mirrors a common real deployment: a dedicated
+#                DNS/DHCP host already exists, and the router's job is NAT
+#                and enforcement, not DNS service.
+#   passthrough  - this Pi does nothing about DNS or DHCP at all. Purely a
+#                NAT/firewall box; LAN clients need DHCP/DNS from elsewhere,
+#                reachable without help from this router.
+router_mode: dhcp_dns
+
+# Used only when router_mode == dns_redirect.
+dns_redirect_target: ""
+
+# Used only when router_mode == dhcp_dns. Kept intentionally small; extend
+# per site as needed. Matches docs/dhcp.md-style conventions: a modest
+# dynamic pool, LAN gateway/DNS server both self.
+dhcp_range_start: 192.168.1.100
+dhcp_range_end: 192.168.1.200
+dhcp_default_lease_time: 600
+dhcp_max_lease_time: 7200
+
+# --- Upstream DNS-over-TLS providers ---
+# Each provider's address(es) are validated against ITS OWN tls_hostname
+# only, never mixed with another provider's. See
+# templates/named.conf.options.j2 — this is what keeps a Cloudflare address
+# from ever being checked against Google's certificate name or vice versa.
+dns_upstream_providers:
+  - name: cloudflare
+    addresses:
+      - 1.1.1.1
+      - 1.0.0.1
+    tls_hostname: cloudflare-dns.com
+
+# --- Tailscale ---
+# See tasks/tailscale.yml for what this gates.
+manage_tailscale: true
+tailscale_advertise_exit_node: true
+# Advertised subnet route. Defaults to the LAN CIDR; override if you want to
+# advertise something else (or nothing, by setting this to "").
+tailscale_advertise_routes: "{{ lan_cidr }}"
+# tailscale_authkey must be supplied via a secrets file that is NOT
+# committed (see secrets.sample.yml) or via --extra-vars / a vault. Never
+# hard-code a real key in group_vars.
+tailscale_authkey: ""
+
+# --- Firewall ---
+# Set true only if you have opened this port on your upstream
+# router/ISP box and want to help Tailscale find a direct (non-DERP) path.
+# Leaving it closed still works — Tailscale falls back to relayed
+# connections — it is just not as fast. Off by default: this role's default
+# posture is "no inbound WAN service", full stop.
+tailscale_allow_wan_udp: false
+tailscale_udp_port: 41641
+
+# Backwards compatibility with the pre-Trixie variable names. If you set
+# these old names, tasks/main.yml maps them onto the variables above so
+# existing group_vars files keep working without edits. New deployments
+# should use the variables above directly. See README.md "Upgrading from
+# older versions".
+# lan_iface: eth0
+# lan_netmask: 255.255.255.0
+# dns_server: 192.168.1.10
+# use_internal_dns_dhcp: true

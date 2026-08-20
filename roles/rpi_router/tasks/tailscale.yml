@@ -1,25 +1,64 @@
 ---
-- name: Install Tailscale (via apt preferred)
-  apt:
-    name: tailscale
-    state: present
-    update_cache: yes
+# manage_tailscale exists so a caller that already manages Tailscale
+# enrolment itself (Fleet's own tailscale role, for instance) can delegate
+# everything else in this role without also getting a second, competing
+# `tailscale up` invocation. Standalone users of this repository leave it at
+# its default (true) and get Tailscale set up end to end.
+- name: Manage Tailscale
+  when: manage_tailscale | bool
+  block:
+    - name: Add the Tailscale apt signing key
+      ansible.builtin.get_url:
+        url: "https://pkgs.tailscale.com/stable/debian/{{ ansible_facts.distribution_release }}.noarmor.gpg"
+        dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        mode: "0644"
 
-- name: Ensure Tailscale service is enabled and started
-  ansible.builtin.systemd:
-    name: tailscaled
-    enabled: yes
-    state: started
+    - name: Add the Tailscale apt repository
+      ansible.builtin.get_url:
+        url: "https://pkgs.tailscale.com/stable/debian/{{ ansible_facts.distribution_release }}.tailscale-keyring.list"
+        dest: /etc/apt/sources.list.d/tailscale.list
+        mode: "0644"
+      register: rpi_router_ts_repo
 
-- name: Check if Tailscale is already up
-  shell: tailscale status
-  register: tailscale_status
-  ignore_errors: true
+    - name: Refresh apt cache after adding the Tailscale repository
+      ansible.builtin.apt:
+        update_cache: true
+      when: rpi_router_ts_repo.changed
 
-- name: Bring up Tailscale with Exit Node, Subnet Routing, and Authkey if not connected
-  shell: |
-    tailscale up --authkey {{ tailscale_authkey }} --advertise-exit-node --advertise-routes={{ lan_cidr }}
-  when: "'NoState' in tailscale_status.stdout or 'stopped' in tailscale_status.stdout or tailscale_status.rc != 0"
-  args:
-    executable: /bin/bash
+    - name: Install Tailscale
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
 
+    - name: Ensure tailscaled is enabled and running
+      ansible.builtin.systemd_service:
+        name: tailscaled
+        enabled: true
+        state: started
+
+    - name: Check current Tailscale connection state
+      ansible.builtin.command: tailscale status --json
+      register: rpi_router_ts_status
+      changed_when: false
+      failed_when: false
+
+    - name: Bring Tailscale up
+      ansible.builtin.command:
+        cmd: >-
+          tailscale up
+          --authkey={{ tailscale_authkey }}
+          {{ '--advertise-exit-node' if tailscale_advertise_exit_node | bool else '' }}
+          {{ '--advertise-routes=' ~ tailscale_advertise_routes if tailscale_advertise_routes | length > 0 else '' }}
+        no_log: true
+      when:
+        - tailscale_authkey | length > 0
+        - rpi_router_ts_status.rc != 0 or ('BackendState' in rpi_router_ts_status.stdout and '"Running"' not in rpi_router_ts_status.stdout)
+      changed_when: true
+
+    - name: No authkey supplied — Tailscale installed but not enrolled
+      ansible.builtin.debug:
+        msg: >-
+          tailscale_authkey is empty; Tailscale is installed and running but
+          not connected to a tailnet. Run `tailscale up` manually, or set
+          tailscale_authkey from a secret store and re-run.
+      when: tailscale_authkey | length == 0

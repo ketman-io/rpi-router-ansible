@@ -1,43 +1,33 @@
 ---
-- name: Install iptables if needed
-  apt:
-    name: iptables
+# Native nftables. No iptables-nft compatibility layer, no legacy `iptables`
+# Ansible module. Debian Trixie ships nftables as the default and iptables
+# only via the compatibility package, and this role does not install that
+# package.
+#
+# Tailscale manages its own packet-filtering (it detects nftables and
+# creates its own top-level tables/chains independent of this ruleset) — see
+# the template's comments for what this role does to stay out of its way.
+
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
     state: present
-    update_cache: yes
 
-- name: Install iptables-persistent to save rules across reboots
-  apt:
-    name: iptables-persistent
-    state: present
-    update_cache: yes
+- name: Enable and start the nftables service (loads /etc/nftables.conf at boot)
+  ansible.builtin.systemd_service:
+    name: nftables
+    enabled: true
 
-- name: Setup NAT masquerading (LAN to WAN)
-  iptables:
-    table: nat
-    chain: POSTROUTING
-    out_interface: "{{ wan_iface }}"
-    jump: MASQUERADE
+- name: Install the fleet ruleset
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0640"
+    backup: true
+    validate: /usr/sbin/nft -c -f %s
+  notify: reload nftables
 
-- name: Redirect all DNS (UDP) traffic to internal DoT server
-  iptables:
-    table: nat
-    chain: PREROUTING
-    protocol: udp
-    destination_port: 53
-    in_interface: "{{ lan_iface }}"
-    jump: DNAT
-    to_destination: "{{ dns_server }}:53"
-
-- name: Redirect all DNS (TCP) traffic to internal DoT server
-  iptables:
-    table: nat
-    chain: PREROUTING
-    protocol: tcp
-    destination_port: 53
-    in_interface: "{{ lan_iface }}"
-    jump: DNAT
-    to_destination: "{{ dns_server }}:53"
-
-- name: Save current iptables rules (IPv4)
-  shell: iptables-save > /etc/iptables/rules.v4
-
+- name: Apply immediately (not only at next boot)
+  ansible.builtin.meta: flush_handlers

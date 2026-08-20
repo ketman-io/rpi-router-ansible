@@ -1,19 +1,42 @@
+// Managed by rpi_router (Ansible). Native BIND DNS-over-TLS — no Stubby,
+// no local proxy of any kind between BIND and its upstream resolvers.
+//
+// Each provider gets its own `tls` profile keyed to ITS OWN tls_hostname,
+// and each of that provider's addresses is bound to that profile
+// individually in the forwarders list below (BIND 9.18+ supports a
+// per-address port/tls suffix in one forwarders statement). That per-address
+// binding is what keeps a Cloudflare address from ever being checked
+// against Google's certificate name or vice versa — sharing one TLS
+// profile across providers would defeat the point of remote-hostname
+// checking.
+{% for provider in dns_upstream_providers %}
+tls dot-{{ provider.name }} {
+    remote-hostname "{{ provider.tls_hostname }}";
+};
+{% endfor %}
+
 options {
     directory "/var/cache/bind";
-
-    forwarders {
-        127.0.0.1 port 8053;
-    };
-
+    listen-on { 127.0.0.1; {{ lan_ip }}; };
+    listen-on-v6 { none; };
+    allow-query { localhost; {{ lan_cidr }}; };
+    allow-recursion { localhost; {{ lan_cidr }}; };
+    allow-transfer { none; };
+    recursion yes;
+    minimal-responses yes;
     dnssec-validation auto;
+    version "not-disclosed";
 
-    listen-on { any; };
-    allow-query { any; };
-
-    # DNS-over-TLS upstream
     forward only;
-
-    # Optional DoT port config (if bind9 is compiled with DoT)
-    # tls-ca-file "/etc/ssl/certs/ca-certificates.crt";
+    forwarders {
+{% for provider in dns_upstream_providers %}
+{% for address in provider.addresses %}
+        {{ address }} port 853 tls dot-{{ provider.name }};
+{% endfor %}
+{% endfor %}
+    };
 };
 
+logging {
+    category lame-servers { null; };
+};

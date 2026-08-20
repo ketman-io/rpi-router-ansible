@@ -1,0 +1,55 @@
+---
+# Raspberry Pi 5 PCIe is off by default and must be turned on in the boot
+# firmware config for a PCIe Ethernet card (e.g. the Waveshare PCIE TO 4-CH
+# 2.5G ETH Board) to appear at all. Deliberately Gen2 (the board's own
+# generation) — Gen3 is available on the Pi 5 but buys nothing for hardware
+# that only speaks Gen2, and is not enabled here.
+#
+# Trixie's Raspberry Pi OS boot config lives at /boot/firmware/config.txt,
+# not /boot/config.txt (the pre-Bullseye location) — this is the one
+# concrete Bookworm-vs-Trixie path difference that would otherwise silently
+# write to the wrong file.
+
+- name: Ensure boot config exists at the expected Trixie path
+  ansible.builtin.stat:
+    path: "{{ boot_config_path }}"
+  register: rpi_router_boot_config
+
+- name: Fail with a clear message if boot config is not where expected
+  ansible.builtin.fail:
+    msg: >-
+      {{ boot_config_path }} does not exist. On Raspberry Pi OS Bookworm and
+      earlier this file lived at /boot/config.txt; set boot_config_path
+      explicitly if this is not a Trixie image.
+  when: not rpi_router_boot_config.stat.exists
+
+- name: Enable PCIe (Gen2)
+  ansible.builtin.lineinfile:
+    path: "{{ boot_config_path }}"
+    regexp: '^dtparam=pciex1(\b|=).*$'
+    line: dtparam=pciex1
+    insertafter: EOF
+  register: rpi_router_pcie_enabled
+
+- name: Ensure PCIe Gen3 is not force-enabled
+  ansible.builtin.lineinfile:
+    path: "{{ boot_config_path }}"
+    regexp: '^dtparam=pciex1_gen=3\s*$'
+    state: absent
+  when: not (pcie_gen3 | bool)
+
+- name: Set PCIe Gen3 explicitly, only if requested
+  ansible.builtin.lineinfile:
+    path: "{{ boot_config_path }}"
+    regexp: '^dtparam=pciex1_gen=.*$'
+    line: dtparam=pciex1_gen=3
+    insertafter: '^dtparam=pciex1$'
+  when: pcie_gen3 | bool
+
+- name: Reboot required for PCIe change to take effect
+  ansible.builtin.debug:
+    msg: >-
+      dtparam=pciex1 was just added to {{ boot_config_path }}. A reboot is
+      required before the PCIe Ethernet card's interfaces will exist. Run
+      this playbook again after rebooting to configure them.
+  when: rpi_router_pcie_enabled.changed

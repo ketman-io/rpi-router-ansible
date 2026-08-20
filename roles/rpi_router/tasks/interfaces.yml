@@ -1,6 +1,84 @@
-- name: Copy network interfaces config
-  template:
-    src: interfaces.j2
-    dest: /etc/network/interfaces
-  notify: Restart networking
+---
+# NetworkManager is Raspberry Pi OS's default network backend on Trixie
+# (ifupdown's /etc/network/interfaces is not used here — a role that wrote
+# both would leave two competing sources of truth for the same interface).
+#
+# The LAN bridge owns the IP configuration. The four (or however many)
+# physical LAN interfaces are bridge slaves with no IP configuration of
+# their own — attaching an address to a slave interface directly is a classic
+# way to end up with traffic silently leaving by the wrong path.
 
+- name: Install NetworkManager if missing
+  ansible.builtin.apt:
+    name: network-manager
+    state: present
+  register: rpi_router_nm_installed
+
+- name: Ensure NetworkManager is enabled and running
+  ansible.builtin.systemd_service:
+    name: NetworkManager
+    enabled: true
+    state: started
+
+- name: List existing NetworkManager connection profiles
+  ansible.builtin.command: nmcli -t -f NAME connection show
+  register: rpi_router_nm_connections
+  changed_when: false
+
+# --- WAN ---
+
+- name: Create the WAN connection profile if missing
+  ansible.builtin.command: >-
+    nmcli connection add type ethernet ifname {{ wan_iface }} con-name wan
+    autoconnect yes ipv4.method auto ipv6.method auto
+  when: "'wan' not in rpi_router_nm_connections.stdout_lines"
+  register: rpi_router_wan_created
+  changed_when: true
+
+- name: Bring up the WAN connection
+  ansible.builtin.command: nmcli connection up wan
+  changed_when: true
+
+# --- LAN bridge ---
+
+- name: Create the LAN bridge connection profile if missing
+  ansible.builtin.command: >-
+    nmcli connection add type bridge ifname {{ lan_bridge }} con-name {{ lan_bridge }}
+    autoconnect yes ipv4.method manual ipv4.addresses {{ lan_ip }}/{{ lan_prefix }}
+    ipv6.method disabled bridge.stp {{ 'yes' if lan_bridge_stp | bool else 'no' }}
+  when: lan_bridge not in rpi_router_nm_connections.stdout_lines
+  changed_when: true
+
+- name: Ensure the LAN bridge address matches desired state
+  ansible.builtin.command: >-
+    nmcli connection modify {{ lan_bridge }} ipv4.method manual
+    ipv4.addresses {{ lan_ip }}/{{ lan_prefix }} ipv4.gateway ""
+    bridge.stp {{ 'yes' if lan_bridge_stp | bool else 'no' }}
+  register: rpi_router_bridge_modify
+  changed_when: true
+  when: lan_bridge in rpi_router_nm_connections.stdout_lines
+
+- name: Create a bridge-slave connection profile for each LAN interface
+  ansible.builtin.command: >-
+    nmcli connection add type ethernet ifname {{ item }}
+    con-name {{ lan_bridge }}-{{ item }} master {{ lan_bridge }}
+    slave-type bridge autoconnect yes
+  loop: "{{ lan_ifaces }}"
+  when: (lan_bridge ~ '-' ~ item) not in rpi_router_nm_connections.stdout_lines
+  changed_when: true
+
+- name: Bring up the LAN bridge
+  ansible.builtin.command: nmcli connection up {{ lan_bridge }}
+  changed_when: true
+
+- name: Bring up each bridge-slave connection
+  ansible.builtin.command: nmcli connection up {{ lan_bridge }}-{{ item }}
+  loop: "{{ lan_ifaces }}"
+  register: rpi_router_slave_up
+  changed_when: rpi_router_slave_up.rc == 0
+  failed_when: >-
+    rpi_router_slave_up.rc != 0 and
+    'no suitable device found' not in (rpi_router_slave_up.stderr | default('') | lower)
+  # A slave with no physical carrier (e.g. an unpopulated port) cannot be
+  # activated yet. It stays a correctly-configured, inactive profile —
+  # exactly what you want for hardware that is only partially cabled.

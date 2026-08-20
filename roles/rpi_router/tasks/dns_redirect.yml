@@ -1,0 +1,19 @@
+---
+# router_mode: dns_redirect — an existing host on the LAN already serves
+# DHCP/DNS. This router does not run either; it only enforces the intended
+# resolver via a DNAT rule in firewall.yml. The tasks here are housekeeping
+# for a box that may have previously run in dhcp_dns mode.
+
+- name: Ensure isc-dhcp-server is stopped and disabled
+  ansible.builtin.systemd_service:
+    name: isc-dhcp-server
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Ensure named is stopped and disabled
+  ansible.builtin.systemd_service:
+    name: named
+    enabled: false
+    state: stopped
+  failed_when: false

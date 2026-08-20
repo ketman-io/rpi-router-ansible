@@ -1,24 +1,56 @@
 ---
-- name: Configure networking interfaces
-  include_tasks: interfaces_nmcli.yml
+# Backwards compatibility: map the pre-Trixie variable names onto the
+# current ones, only when the old name is actually set and the new one
+# wasn't already given explicitly. See defaults/main.yml and README.md
+# "Upgrading from older versions".
+- name: Map legacy lan_iface onto lan_ifaces
+  ansible.builtin.set_fact:
+    lan_ifaces: "{{ [lan_iface] }}"
+  when:
+    - lan_iface is defined
+    - lan_ifaces == ['eth1']
+
+- name: Map legacy use_internal_dns_dhcp onto router_mode
+  ansible.builtin.set_fact:
+    router_mode: "{{ 'dhcp_dns' if (use_internal_dns_dhcp | bool) else 'dns_redirect' }}"
+  when:
+    - use_internal_dns_dhcp is defined
+    - router_mode == 'dhcp_dns'
+    - not (use_internal_dns_dhcp | bool)
+
+- name: Map legacy dns_server onto dns_redirect_target
+  ansible.builtin.set_fact:
+    dns_redirect_target: "{{ dns_server }}"
+  when:
+    - dns_server is defined
+    - dns_redirect_target == ""
+
+- name: Preflight checks
+  ansible.builtin.import_tasks: preflight.yml
+
+- name: Enable Raspberry Pi 5 PCIe (Waveshare and similar PCIe NICs)
+  ansible.builtin.import_tasks: pcie.yml
+  when: enable_pcie | bool
+
+- name: Configure WAN and LAN-bridge networking
+  ansible.builtin.import_tasks: interfaces.yml
 
 - name: Enable IP forwarding
-  include_tasks: ip_forwarding.yml
+  ansible.builtin.import_tasks: ip_forwarding.yml
 
-- name: Set up firewall (NAT, DNS redirect, etc.)
-  include_tasks: firewall.yml
+- name: Configure the router's own DNS resolution
+  ansible.builtin.import_tasks: resolv.yml
 
-- name: Disable systemd-resolved and configure resolv.conf
-  include_tasks: systemd_dns_cleanup.yml
+- name: Run this Pi's own DHCP/DNS service
+  ansible.builtin.import_tasks: dns_dhcp.yml
+  when: router_mode == 'dhcp_dns'
 
-- name: Optionally configure internal DNS and DHCP
-  include_tasks: dns_dhcp.yml
-  when: not use_internal_dns_dhcp
+- name: Redirect LAN DNS traffic to an existing resolver
+  ansible.builtin.import_tasks: dns_redirect.yml
+  when: router_mode == 'dns_redirect'
 
-- name: Install and configure stubby for encrypted DNS
-  include_tasks: stubby.yml
-  when: not use_internal_dns_dhcp
+- name: Configure nftables firewall (NAT, forwarding, DNS redirect)
+  ansible.builtin.import_tasks: firewall.yml
 
-- name: Set up Tailscale
-  include_tasks: tailscale.yml
-
+- name: Configure Tailscale
+  ansible.builtin.import_tasks: tailscale.yml
