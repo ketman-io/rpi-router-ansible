@@ -1,0 +1,21 @@
+---
+# Exercises roles/rpi_router/tasks/legacy_mapping.yml directly — the old
+# lan_iface/use_internal_dns_dhcp/router_mode/dns_server names must still
+# produce the current lan_ifaces/manage_dhcp/manage_dns/
+# dns_redirect_enabled/dns_redirect_target values without requiring an
+# existing group_vars file to be edited. No host, no privilege, no other
+# task in the role runs.
+- name: Legacy variable mapping
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/rpi_router/defaults/main.yml
+    - "{{ vars_file }}"
+  tasks:
+    - name: Run the real mapping tasks
+      ansible.builtin.import_tasks: ../roles/rpi_router/tasks/legacy_mapping.yml
+
+    - name: Report the resolved values, for run_tests.sh to check
+      ansible.builtin.debug:
+        msg: "RESOLVED lan_ifaces={{ lan_ifaces }} manage_dhcp={{ manage_dhcp }} manage_dns={{ manage_dns }} dns_redirect_enabled={{ dns_redirect_enabled }} dns_redirect_target={{ dns_redirect_target }}"

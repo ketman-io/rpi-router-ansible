@@ -1,40 +1,6 @@
 ---
-# Backwards compatibility: map the pre-Trixie variable names onto the
-# current ones, only when the old name is actually set and the new one
-# wasn't already given explicitly. See defaults/main.yml and README.md
-# "Upgrading from older versions".
-- name: Map legacy lan_iface onto lan_ifaces
-  ansible.builtin.set_fact:
-    lan_ifaces: "{{ [lan_iface] }}"
-  when:
-    - lan_iface is defined
-    - lan_ifaces == ['eth1']
-
-# use_internal_dns_dhcp long predates router_mode, which itself predates
-# manage_dhcp/manage_dns — chained rather than each mapping independently
-# onto the current variables, so the one legacy path stays in one place.
-- name: Map legacy use_internal_dns_dhcp onto router_mode
-  ansible.builtin.set_fact:
-    router_mode: "{{ 'dhcp_dns' if (use_internal_dns_dhcp | bool) else 'dns_redirect' }}"
-  when:
-    - use_internal_dns_dhcp is defined
-    - router_mode is not defined
-
-- name: Map legacy router_mode onto manage_dhcp/manage_dns/dns_redirect_enabled
-  ansible.builtin.set_fact:
-    manage_dhcp: "{{ router_mode == 'dhcp_dns' }}"
-    manage_dns: "{{ router_mode == 'dhcp_dns' }}"
-    dns_redirect_enabled: "{{ router_mode == 'dns_redirect' }}"
-  when:
-    - router_mode is defined
-    - not (manage_dhcp | bool) and not (manage_dns | bool) and not (dns_redirect_enabled | bool)
-
-- name: Map legacy dns_server onto dns_redirect_target
-  ansible.builtin.set_fact:
-    dns_redirect_target: "{{ dns_server }}"
-  when:
-    - dns_server is defined
-    - dns_redirect_target == ""
+- name: Map legacy variable names onto the current ones
+  ansible.builtin.import_tasks: legacy_mapping.yml
 
 - name: Preflight checks
   ansible.builtin.import_tasks: preflight.yml

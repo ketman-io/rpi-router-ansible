@@ -1,0 +1,13 @@
+wan_iface: eth0
+lan_ifaces: []
+lan_bridge: br0
+lan_ip: 192.168.1.1
+lan_prefix: 24
+lan_cidr: 192.168.1.0/24
+manage_dhcp: false
+manage_dns: false
+dns_redirect_enabled: false
+dns_redirect_target: ""
+dns_ddns_enabled: false
+dns_authoritative_zones: []
+dhcp_domain_name: ""

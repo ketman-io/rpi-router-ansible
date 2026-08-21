@@ -1,0 +1,2 @@
+router_mode: dns_redirect
+dns_server: 192.168.1.31

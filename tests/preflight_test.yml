@@ -1,0 +1,22 @@
+---
+# Exercises roles/rpi_router/tasks/preflight.yml directly against localhost,
+# with no privilege and no device changes — pure ansible.builtin.assert
+# tasks. Driven by tests/run_tests.sh, once with vars that must pass and
+# once each for vars that must be refused (see that script for the matrix).
+# A "must fail" case is expected to end this play with a non-zero exit
+# code; run_tests.sh checks for that, not for a clean run.
+- name: Preflight validation
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  # Role defaults first, so the scenario file (listed second) overrides
+  # them — this is not loaded automatically the way it would be for a real
+  # role inclusion, since this playbook calls preflight.yml directly via
+  # include_tasks rather than through roles:/include_role, precisely so it
+  # can run with no host and no privilege at all.
+  vars_files:
+    - ../roles/rpi_router/defaults/main.yml
+    - "{{ vars_file }}"
+  tasks:
+    - name: Run preflight checks
+      ansible.builtin.include_tasks: ../roles/rpi_router/tasks/preflight.yml

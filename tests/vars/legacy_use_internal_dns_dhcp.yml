@@ -1,0 +1,2 @@
+use_internal_dns_dhcp: false
+dns_server: 192.168.1.31
