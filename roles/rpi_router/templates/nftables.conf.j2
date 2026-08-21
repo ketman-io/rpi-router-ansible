@@ -70,6 +70,18 @@ table inet filter {
         # established/related above; this line is the initial direction).
         iifname "{{ lan_bridge }}" oifname "{{ wan_iface }}" accept
 
+{% if router_mode == 'dns_redirect' %}
+        # NAT hairpin for the DNS redirect above: dns_redirect_target is
+        # commonly on the SAME subnet as the LAN bridge itself (a dedicated
+        # DNS/DHCP host on the ordinary LAN, not behind a separate router
+        # hop) — proven live: without this, DNAT correctly rewrites the
+        # destination in prerouting, but the rewritten packet is now bound
+        # for another host on this same bridge, which is a forward decision,
+        # not a local one, and the plain LAN -> WAN rule above does not
+        # cover LAN -> LAN.
+        iifname "{{ lan_bridge }}" oifname "{{ lan_bridge }}" ip daddr {{ dns_redirect_target }} accept
+{% endif %}
+
         # Tailscale subnet routing / exit-node traffic in either direction.
         iifname "tailscale0" accept
         oifname "tailscale0" accept
