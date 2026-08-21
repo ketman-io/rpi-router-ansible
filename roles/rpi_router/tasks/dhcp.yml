@@ -1,0 +1,70 @@
+---
+# manage_dhcp: true — this router runs isc-dhcp-server, independent of
+# whether it also runs DNS (manage_dns is a separate capability). See
+# defaults/main.yml for why these are two booleans, not one mode string.
+
+- name: Manage DHCP
+  when: manage_dhcp | bool
+  block:
+    - name: Ensure dnsmasq is not installed (would conflict with isc-dhcp-server)
+      ansible.builtin.apt:
+        name: dnsmasq
+        state: absent
+        purge: true
+
+    - name: Install isc-dhcp-server
+      ansible.builtin.apt:
+        name: isc-dhcp-server
+        state: present
+
+    - name: Deploy dhcpd.conf
+      ansible.builtin.template:
+        src: dhcpd.conf.j2
+        dest: /etc/dhcp/dhcpd.conf
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        validate: /usr/sbin/dhcpd -t -cf %s
+      notify: restart isc-dhcp-server
+
+    - name: Deploy the DDNS TSIG key file for dhcpd, if DDNS is enabled
+      ansible.builtin.template:
+        src: ddns.key.j2
+        dest: /etc/dhcp/ddns.key
+        owner: root
+        group: root
+        mode: "0640"
+      when: dns_ddns_enabled | bool
+      notify: restart isc-dhcp-server
+      no_log: true
+
+    - name: Restrict isc-dhcp-server to the LAN bridge only (never listen on WAN)
+      ansible.builtin.lineinfile:
+        path: /etc/default/isc-dhcp-server
+        regexp: '^INTERFACESv4='
+        line: 'INTERFACESv4="{{ lan_bridge }}"'
+        create: true
+      notify: restart isc-dhcp-server
+
+    - name: Apply DHCP config changes now (validated by the template task above)
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start isc-dhcp-server
+      ansible.builtin.systemd_service:
+        name: isc-dhcp-server
+        enabled: true
+        state: started
+
+# The opposite housekeeping: a box that used to run DHCP and no longer
+# should (manage_dhcp flipped to false) must not be left with a stale
+# server still handing out leases. isc-dhcp-server is never restarted in
+# the same handler flush as named — see dns.yml and docs/dhcp.md-style
+# connectivity-loss discipline this mirrors.
+- name: Ensure isc-dhcp-server is stopped and disabled when not managed here
+  ansible.builtin.systemd_service:
+    name: isc-dhcp-server
+    enabled: false
+    state: stopped
+  when: not (manage_dhcp | bool)
+  failed_when: false

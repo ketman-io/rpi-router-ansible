@@ -1,0 +1,15 @@
+// Managed by rpi_router (Ansible): authoritative zones this router also
+// serves, alongside its recursive service (named.conf.options).
+{% if dns_ddns_enabled %}
+include "/etc/bind/ddns.key";
+{% endif %}
+{% for zone in dns_authoritative_zones %}
+zone "{{ zone.name }}" {
+    type primary;
+    file "{{ zone.file }}";
+{% if zone.dynamic | default(false) %}
+    update-policy { grant {{ dns_ddns_key_name }} zonesub ANY; };
+{% endif %}
+    allow-transfer { none; };
+};
+{% endfor %}

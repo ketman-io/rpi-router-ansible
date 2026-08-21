@@ -10,13 +10,24 @@
     - lan_iface is defined
     - lan_ifaces == ['eth1']
 
+# use_internal_dns_dhcp long predates router_mode, which itself predates
+# manage_dhcp/manage_dns — chained rather than each mapping independently
+# onto the current variables, so the one legacy path stays in one place.
 - name: Map legacy use_internal_dns_dhcp onto router_mode
   ansible.builtin.set_fact:
     router_mode: "{{ 'dhcp_dns' if (use_internal_dns_dhcp | bool) else 'dns_redirect' }}"
   when:
     - use_internal_dns_dhcp is defined
-    - router_mode == 'dhcp_dns'
-    - not (use_internal_dns_dhcp | bool)
+    - router_mode is not defined
+
+- name: Map legacy router_mode onto manage_dhcp/manage_dns/dns_redirect_enabled
+  ansible.builtin.set_fact:
+    manage_dhcp: "{{ router_mode == 'dhcp_dns' }}"
+    manage_dns: "{{ router_mode == 'dhcp_dns' }}"
+    dns_redirect_enabled: "{{ router_mode == 'dns_redirect' }}"
+  when:
+    - router_mode is defined
+    - not (manage_dhcp | bool) and not (manage_dns | bool) and not (dns_redirect_enabled | bool)
 
 - name: Map legacy dns_server onto dns_redirect_target
   ansible.builtin.set_fact:
@@ -38,20 +49,23 @@
 - name: Enable IP forwarding
   ansible.builtin.import_tasks: ip_forwarding.yml
 
-# DNS/DHCP is installed BEFORE this role touches the router's own DNS
-# resolution (resolv.yml, below) — not after. dhcp_dns mode points this
+# DHCP and DNS are installed BEFORE this role touches the router's own DNS
+# resolution (resolv.yml, below) — not after. manage_dns points this
 # router's own /etc/resolv.conf at 127.0.0.1; doing that before bind9 is
 # even installed would break the apt install of bind9 itself, which still
 # needs working DNS to reach the package mirror. Caught in review while
 # reconciling this role with independent upstream work that had already
 # found the same ordering bug.
-- name: Run this Pi's own DHCP/DNS service
-  ansible.builtin.import_tasks: dns_dhcp.yml
-  when: router_mode == 'dhcp_dns'
+- name: Manage DHCP (isc-dhcp-server)
+  ansible.builtin.import_tasks: dhcp.yml
 
-- name: Redirect LAN DNS traffic to an existing resolver
-  ansible.builtin.import_tasks: dns_redirect.yml
-  when: router_mode == 'dns_redirect'
+- name: Manage DNS (BIND, native DoT, optional authoritative zones + DDNS)
+  ansible.builtin.import_tasks: dns.yml
+
+# dns_redirect_enabled has no task file of its own: the DNAT (+ hairpin
+# masquerade, when the target is on the LAN's own subnet) rule it needs
+# lives entirely in firewall.yml's nftables template, gated there. Nothing
+# else to converge for it.
 
 - name: Configure the router's own DNS resolution
   ansible.builtin.import_tasks: resolv.yml

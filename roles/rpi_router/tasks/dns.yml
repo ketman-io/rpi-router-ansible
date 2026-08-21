@@ -1,0 +1,87 @@
+---
+# manage_dns: true — this router runs BIND, forwarding recursively over
+# native DNS-over-TLS (no Stubby, no local proxy of any kind), independent
+# of whether it also runs DHCP (manage_dhcp is a separate capability). See
+# defaults/main.yml for why these are two booleans, not one mode string.
+#
+# Authoritative zones + DDNS are optional, additive capabilities on top of
+# the recursive service, gated on dns_authoritative_zones being non-empty —
+# the self-contained remote-site shape a real small-site deployment
+# demonstrated architecturally: router + DHCP + authoritative DNS +
+# recursive DNS + DDNS, all on one box, with dhcpd registering leases into
+# BIND via a shared TSIG key.
+
+- name: Manage DNS
+  when: manage_dns | bool
+  block:
+    - name: Ensure Stubby is not installed
+      ansible.builtin.apt:
+        name: stubby
+        state: absent
+        purge: true
+        autoremove: true
+
+    - name: Install BIND
+      ansible.builtin.apt:
+        name:
+          - bind9
+          - bind9-utils
+          - bind9-dnsutils
+          - ca-certificates
+        state: present
+
+    - name: Deploy named.conf.options (native DoT upstream)
+      ansible.builtin.template:
+        src: named.conf.options.j2
+        dest: /etc/bind/named.conf.options
+        owner: root
+        group: bind
+        mode: "0640"
+        backup: true
+        validate: /usr/sbin/named-checkconf %s
+      notify: reload bind9
+
+    - name: Deploy the DDNS TSIG key file for BIND, if DDNS is enabled
+      ansible.builtin.template:
+        src: ddns.key.j2
+        dest: /etc/bind/ddns.key
+        owner: root
+        group: bind
+        mode: "0640"
+      when: dns_ddns_enabled | bool
+      notify: reload bind9
+      no_log: true
+
+    - name: Deploy named.conf.local (authoritative zones), if any are declared
+      ansible.builtin.template:
+        src: named.conf.local.j2
+        dest: /etc/bind/named.conf.local
+        owner: root
+        group: bind
+        mode: "0640"
+        backup: true
+        validate: /usr/sbin/named-checkconf %s
+      when: dns_authoritative_zones | length > 0
+      notify: reload bind9
+
+    - name: Apply DNS config changes now (validated by the template tasks above)
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start BIND
+      ansible.builtin.systemd_service:
+        name: named
+        enabled: true
+        state: started
+
+# The opposite housekeeping: a box that used to run DNS and no longer
+# should (manage_dns flipped to false) must not be left with a stale
+# resolver still answering. named and isc-dhcp-server (see dhcp.yml) are
+# never restarted/stopped in the same handler flush as each other — an
+# outage in one must never be caused by a change to the other.
+- name: Ensure named is stopped and disabled when not managed here
+  ansible.builtin.systemd_service:
+    name: named
+    enabled: false
+    state: stopped
+  when: not (manage_dns | bool)
+  failed_when: false

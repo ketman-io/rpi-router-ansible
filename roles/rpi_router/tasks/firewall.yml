@@ -8,6 +8,20 @@
 # creates its own top-level tables/chains independent of this ruleset) — see
 # the template's comments for what this role does to stay out of its way.
 
+# Whether the hairpin hole (forward LAN->LAN plus masquerade to
+# dns_redirect_target specifically) is even needed. It is real, necessary
+# NAT — not "broader than necessary" — only when the redirect target sits
+# on the LAN's own subnet, the case that actually needed it live (see
+# nftables.conf.j2's own comment). A target reachable only via WAN needs
+# no special rule at all: the ordinary LAN->WAN forward rule and the
+# general WAN masquerade already cover it, and adding the LAN->LAN hole in
+# that case would be exactly the kind of NAT rule wider than the situation
+# calls for.
+- name: Determine whether the DNS redirect target is on the LAN's own subnet
+  ansible.builtin.set_fact:
+    rpi_router_dns_redirect_hairpin_needed: >-
+      {{ (dns_redirect_target is ansible.utils.in_network(lan_cidr)) if (dns_redirect_enabled | bool) else false }}
+
 - name: Install nftables
   ansible.builtin.apt:
     name: nftables

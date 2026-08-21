@@ -14,11 +14,17 @@ lan_prefix: 24
 lan_netmask: 255.255.255.0
 lan_cidr: 192.168.1.0/24        # the NETWORK address, not lan_ip
 
-# dhcp_dns  - this Pi runs its own DHCP + DNS (native BIND DoT)
-# dns_redirect - an existing host already serves DHCP/DNS; this router only
-#                redirects LAN port-53 traffic to it (dns_redirect_target)
-# passthrough  - this Pi does nothing about DNS/DHCP at all
-router_mode: dhcp_dns
+# DHCP and DNS are independent capabilities — enable neither, either, or
+# both depending on what already exists on your network. This example
+# (both true) is the self-contained small-site shape: this router is the
+# only DHCP/DNS host on its LAN. See README.md "DHCP and DNS" for the
+# other three combinations, including the common "someone else already
+# runs DHCP/DNS; just redirect to it" shape.
+manage_dhcp: true
+manage_dns: true
+
+# Only meaningful when manage_dns is false — see manage_dns above.
+dns_redirect_enabled: false
 dns_redirect_target: ""
 
 dns_upstream_providers:
@@ -28,5 +34,15 @@ dns_upstream_providers:
       - 1.0.0.1
     tls_hostname: cloudflare-dns.com
 
-tailscale_advertise_exit_node: true
+# Optional: authoritative zones + DDNS, for the self-contained small-site
+# shape. Leave empty for a purely recursive resolver (the common case).
+# See README.md "DHCP and DNS" and secrets.sample.yml for how the TSIG
+# secret itself is meant to be supplied.
+dns_authoritative_zones: []
+dns_ddns_enabled: false
+
+# Off by default — see README.md "Tailscale". Set both true and supply
+# tailscale_authkey (via secrets.yml, never here) to enable.
+manage_tailscale: false
+tailscale_advertise_exit_node: false
 tailscale_advertise_routes: "{{ lan_cidr }}"

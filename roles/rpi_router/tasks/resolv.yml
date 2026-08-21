@@ -48,8 +48,8 @@
 - name: Determine this router's own resolver
   ansible.builtin.set_fact:
     rpi_router_own_resolver: >-
-      {{ '127.0.0.1' if router_mode == 'dhcp_dns'
-         else (dns_redirect_target if router_mode == 'dns_redirect' else '') }}
+      {{ '127.0.0.1' if manage_dns | bool
+         else (dns_redirect_target if dns_redirect_enabled | bool else '') }}
 
 - name: Point this router's own resolution at its resolver
   ansible.builtin.copy:

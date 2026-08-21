@@ -5,9 +5,10 @@
 # Design:
 #   - one `table inet filter`, covering IPv4 and IPv6 together, so there is
 #     one ruleset to reason about rather than four (ip/ip6 x filter/whatever).
-#   - a separate `table ip nat` for masquerade and (only in dns_redirect mode)
-#     the DNS-redirect DNAT rule. NAT has no IPv6 equivalent here: this
-#     router does not masquerade IPv6, it only forwards it.
+#   - a separate `table ip nat` for masquerade and (only when
+#     dns_redirect_enabled) the DNS-redirect DNAT rule. NAT has no IPv6
+#     equivalent here: this router does not masquerade IPv6, it only
+#     forwards it.
 #   - default-drop on input and forward. Nothing on WAN is reachable that is
 #     not explicitly allowed here.
 #
@@ -53,9 +54,11 @@ table inet filter {
         # Router services reachable from the LAN only, never from WAN.
         iifname "{{ lan_bridge }}" tcp dport 22 accept
         iifname "{{ lan_bridge }}" udp dport 22 accept
-{% if router_mode == 'dhcp_dns' %}
+{% if manage_dns %}
         iifname "{{ lan_bridge }}" udp dport 53 accept
         iifname "{{ lan_bridge }}" tcp dport 53 accept
+{% endif %}
+{% if manage_dhcp %}
         iifname "{{ lan_bridge }}" udp dport 67 accept
 {% endif %}
     }
@@ -70,15 +73,19 @@ table inet filter {
         # established/related above; this line is the initial direction).
         iifname "{{ lan_bridge }}" oifname "{{ wan_iface }}" accept
 
-{% if router_mode == 'dns_redirect' %}
-        # NAT hairpin for the DNS redirect above: dns_redirect_target is
-        # commonly on the SAME subnet as the LAN bridge itself (a dedicated
+{% if rpi_router_dns_redirect_hairpin_needed %}
+        # NAT hairpin for the DNS redirect below: dns_redirect_target is on
+        # the SAME subnet as the LAN bridge itself here (a dedicated
         # DNS/DHCP host on the ordinary LAN, not behind a separate router
         # hop) — proven live: without this, DNAT correctly rewrites the
         # destination in prerouting, but the rewritten packet is now bound
         # for another host on this same bridge, which is a forward decision,
         # not a local one, and the plain LAN -> WAN rule above does not
-        # cover LAN -> LAN.
+        # cover LAN -> LAN. Only rendered when the target is actually
+        # on-link (rpi_router_dns_redirect_hairpin_needed, computed in
+        # firewall.yml) — a target reachable only via WAN needs no special
+        # hole here at all, and adding one anyway would be exactly the kind
+        # of NAT rule broader than the situation calls for.
         iifname "{{ lan_bridge }}" oifname "{{ lan_bridge }}" ip daddr {{ dns_redirect_target }} accept
 {% endif %}
 
@@ -95,7 +102,7 @@ table inet filter {
 table ip nat {
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
-{% if router_mode == 'dns_redirect' %}
+{% if dns_redirect_enabled %}
         # Transparently redirect LAN-originated DNS to the real resolver,
         # regardless of what DNS server a client is configured to use. This
         # mirrors a common real deployment: DHCP/DNS already lives on a
@@ -108,7 +115,7 @@ table ip nat {
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
         oifname "{{ wan_iface }}" masquerade
-{% if router_mode == 'dns_redirect' %}
+{% if rpi_router_dns_redirect_hairpin_needed %}
         # Masquerade the redirected flow too, not just DNAT it — proven
         # live to be necessary when dns_redirect_target sits on the SAME
         # subnet as the LAN bridge (the ordinary case: a dedicated DNS host
@@ -118,7 +125,11 @@ table ip nat {
         # through this router), and the client discards that reply as
         # coming from an address it never queried. Masquerading forces the
         # reply back through this router, where conntrack un-DNATs and
-        # un-SNATs it correctly before it reaches the client.
+        # un-SNATs it correctly before it reaches the client. Only rendered
+        # when the target is actually on-link — see
+        # rpi_router_dns_redirect_hairpin_needed in firewall.yml; a target
+        # reachable via WAN is already covered by the oifname rule above and
+        # needs no second, broader masquerade rule.
         ip daddr {{ dns_redirect_target }} udp dport 53 masquerade
         ip daddr {{ dns_redirect_target }} tcp dport 53 masquerade
 {% endif %}

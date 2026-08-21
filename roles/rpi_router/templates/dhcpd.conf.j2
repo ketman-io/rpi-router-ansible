@@ -1,6 +1,22 @@
 default-lease-time {{ dhcp_default_lease_time }};
 max-lease-time {{ dhcp_max_lease_time }};
 authoritative;
+{% if dns_ddns_enabled %}
+
+# DDNS: leases are registered into the authoritative zones this router's
+# own BIND serves (see dns_authoritative_zones / named.conf.local), keyed
+# with the same TSIG key BIND's update-policy grants. "interim" style
+# means dhcpd owns adding/removing records for its own leases, without
+# taking over the whole zone the way "ad-hoc" would.
+ddns-update-style interim;
+ddns-updates on;
+include "/etc/dhcp/ddns.key";
+{% for zone in dns_authoritative_zones if zone.dynamic | default(false) %}
+zone {{ zone.name }}. {
+    key {{ dns_ddns_key_name }};
+}
+{% endfor %}
+{% endif %}
 
 # The network address and netmask come straight from lan_cidr/lan_netmask —
 # not hard-coded. A previous version of this template hard-coded
@@ -13,4 +29,13 @@ subnet {{ lan_cidr.split('/')[0] }} netmask {{ lan_netmask }} {
     option routers {{ lan_ip }};
     option subnet-mask {{ lan_netmask }};
     option domain-name-servers {{ lan_ip }};
+{% if dhcp_domain_name %}
+    option domain-name "{{ dhcp_domain_name }}";
+{% endif %}
+{% if dhcp_ntp_servers | length > 0 %}
+    option ntp-servers {{ dhcp_ntp_servers | join(', ') }};
+{% endif %}
+{% if dns_ddns_enabled %}
+    ddns-domainname "{{ dhcp_domain_name }}";
+{% endif %}
 }

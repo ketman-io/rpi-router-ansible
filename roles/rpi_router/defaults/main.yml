@@ -56,38 +56,47 @@ enable_pcie: true
 pcie_gen3: false
 boot_config_path: /boot/firmware/config.txt
 
-# --- Router DNS/DHCP behaviour ---
-# One of:
-#   dhcp_dns   - this Pi runs its own isc-dhcp-server + BIND (native DoT
-#                upstream). Use when there is no other DHCP/DNS server on
-#                the LAN.
-#   dns_redirect - this Pi runs neither DHCP nor DNS. Whatever DHCP server
-#                already serves the LAN keeps doing so; this role
-#                transparently redirects LAN-originated port-53 traffic
-#                (UDP+TCP) to dns_redirect_target, so clients get the
-#                intended resolver even if they ignore the DHCP-advertised
-#                one. This mirrors a common real deployment: a dedicated
-#                DNS/DHCP host already exists, and the router's job is NAT
-#                and enforcement, not DNS service.
-#   passthrough  - this Pi does nothing about DNS or DHCP at all. Purely a
-#                NAT/firewall box; LAN clients need DHCP/DNS from elsewhere,
-#                reachable without help from this router.
-router_mode: dhcp_dns
+# --- Router DHCP/DNS capabilities ---
+#
+# DHCP and DNS are independent capabilities, not a single mode string.
+# Two real deployments taught this: one site's router (piroute25-shaped)
+# runs neither — DHCP/DNS live on a dedicated host elsewhere, and this
+# router only redirects/enforces; another site's router (the Grey-Winters
+# shape) is small and remote enough that it is more sensible for the
+# router to run DHCP AND DNS itself, including authoritative zones and
+# DDNS. "Router + DHCP only" and "Router + DNS only" are real, useful
+# combinations too — a site might already run BIND elsewhere but want this
+# box to hand out leases, or vice versa. Compose the two booleans rather
+# than picking from a matrix of named modes.
+manage_dhcp: false
+manage_dns: false
 
-# Used only when router_mode == dns_redirect.
+# dns_redirect is a THIRD, independent thing, not a fallback mode of the
+# two above: even when this router runs neither DHCP nor DNS, it can still
+# transparently redirect LAN-originated port-53 traffic (UDP+TCP) to
+# dns_redirect_target, so clients get the intended resolver even if they
+# ignore the DHCP-advertised one or hardcode a public one. This is what a
+# dedicated DNS/DHCP host elsewhere generally wants alongside
+# manage_dhcp/manage_dns both false. Mutually exclusive with manage_dns —
+# a router cannot both BE the DNS server and redirect to a different one.
+dns_redirect_enabled: false
 dns_redirect_target: ""
 
-# Used only when router_mode == dhcp_dns. Kept intentionally small; extend
-# per site as needed. Matches docs/dhcp.md-style conventions: a modest
-# dynamic pool, LAN gateway/DNS server both self.
+# --- DHCP (used only when manage_dhcp: true) ---
+# Kept intentionally small; extend per site as needed. Matches common
+# small-site conventions: a modest dynamic pool, LAN gateway/DNS server
+# both self.
 dhcp_range_start: 192.168.1.100
 dhcp_range_end: 192.168.1.200
 dhcp_default_lease_time: 600
 dhcp_max_lease_time: 7200
+dhcp_domain_name: ""
+dhcp_ntp_servers: []
 
-# --- Upstream DNS-over-TLS providers ---
-# Each provider's address(es) are validated against ITS OWN tls_hostname
-# only, never mixed with another provider's. See
+# --- DNS (used only when manage_dns: true) ---
+#
+# Each upstream provider's address(es) are validated against ITS OWN
+# tls_hostname only, never mixed with another provider's. See
 # templates/named.conf.options.j2 — this is what keeps a Cloudflare address
 # from ever being checked against Google's certificate name or vice versa.
 dns_upstream_providers:
@@ -97,19 +106,46 @@ dns_upstream_providers:
       - 1.0.0.1
     tls_hostname: cloudflare-dns.com
 
+# Optional authoritative zones this router's BIND should also serve — the
+# self-contained remote-site shape (DHCP + authoritative DNS + recursive
+# DNS + DDNS all on one box), demonstrated architecturally by a real
+# small-site deployment. Empty by default: most routers are recursive-only.
+# Example:
+#   dns_authoritative_zones:
+#     - name: example.internal
+#       file: /etc/bind/zones/db.example.internal
+#       dynamic: true          # updated via DDNS from dhcpd — see below
+#     - name: 1.168.192.in-addr.arpa
+#       file: /etc/bind/zones/db.192.168.1
+#       dynamic: true
+dns_authoritative_zones: []
+
+# DDNS: dhcpd registers leases into the zones above via a shared TSIG key.
+# Only meaningful when dns_authoritative_zones is non-empty and at least
+# one zone has dynamic: true. The secret itself is never set here — supply
+# it via --extra-vars, an Ansible Vault file, or your own secret manager,
+# generated with `tsig-keygen -a hmac-sha256 <key-name>`. This role refuses
+# to proceed with dns_ddns_enabled: true and an empty secret rather than
+# silently rendering a config with no key material.
+dns_ddns_enabled: false
+dns_ddns_key_name: DDNS_UPDATE
+dns_ddns_key_algorithm: hmac-sha256
+dns_ddns_key_secret: ""
+
 # --- Tailscale ---
-# See tasks/tailscale.yml for what this gates.
-manage_tailscale: true
-tailscale_advertise_exit_node: true
-# Advertised subnet route. Defaults to the LAN CIDR; override if you want to
-# advertise something else (or nothing, by setting this to "").
+#
+# Off by default. A router is not inherently a Tailscale node any more
+# than any other host is — Tailscale is an optional capability this role
+# supports, never one it implies. Enable explicitly per deployment.
+manage_tailscale: false
+tailscale_advertise_exit_node: false
+# Advertised subnet route when enabled. Defaults to the LAN CIDR; override
+# to advertise something else (or nothing, by setting this to "").
 tailscale_advertise_routes: "{{ lan_cidr }}"
 # tailscale_authkey must be supplied via a secrets file that is NOT
 # committed (see secrets.sample.yml) or via --extra-vars / a vault. Never
 # hard-code a real key in group_vars.
 tailscale_authkey: ""
-
-# --- Firewall ---
 # Set true only if you have opened this port on your upstream
 # router/ISP box and want to help Tailscale find a direct (non-DERP) path.
 # Leaving it closed still works — Tailscale falls back to relayed
@@ -118,12 +154,12 @@ tailscale_authkey: ""
 tailscale_allow_wan_udp: false
 tailscale_udp_port: 41641
 
-# Backwards compatibility with the pre-Trixie variable names. If you set
-# these old names, tasks/main.yml maps them onto the variables above so
-# existing group_vars files keep working without edits. New deployments
-# should use the variables above directly. See README.md "Upgrading from
-# older versions".
+# Backwards compatibility with older variable names. If you set these, they
+# are mapped onto the variables above so existing group_vars files keep
+# working without edits. New deployments should use the variables above
+# directly. See README.md "Upgrading from older versions".
 # lan_iface: eth0
 # lan_netmask: 255.255.255.0
 # dns_server: 192.168.1.10
 # use_internal_dns_dhcp: true
+# router_mode: dhcp_dns   # dhcp_dns | dns_redirect | passthrough

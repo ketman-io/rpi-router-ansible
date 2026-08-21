@@ -3,22 +3,58 @@
 # confusing runtime failure four tasks later — e.g. a bridge silently
 # containing the WAN port, or a DNS mode with no target to redirect to.
 
-- name: Assert router_mode is one of the supported values
+- name: Assert manage_dns and dns_redirect_enabled are not both set
   ansible.builtin.assert:
     that:
-      - router_mode in ['dhcp_dns', 'dns_redirect', 'passthrough']
+      - not ((manage_dns | bool) and (dns_redirect_enabled | bool))
     fail_msg: >-
-      router_mode must be one of dhcp_dns, dns_redirect, passthrough
-      (got '{{ router_mode }}').
+      manage_dns and dns_redirect_enabled cannot both be true — a router
+      cannot both BE the DNS server and redirect LAN DNS traffic to a
+      different one. Pick one.
 
-- name: Assert dns_redirect_target is set when router_mode is dns_redirect
+- name: Assert dns_redirect_target is set when dns_redirect_enabled
   ansible.builtin.assert:
     that:
       - dns_redirect_target | length > 0
     fail_msg: >-
-      router_mode is dns_redirect but dns_redirect_target is empty. Set it
+      dns_redirect_enabled is true but dns_redirect_target is empty. Set it
       to the address of the resolver LAN clients should actually reach.
-  when: router_mode == 'dns_redirect'
+  when: dns_redirect_enabled | bool
+
+- name: Assert DDNS has at least one dynamic zone to update when enabled
+  ansible.builtin.assert:
+    that:
+      - dns_authoritative_zones | selectattr('dynamic', 'defined') | selectattr('dynamic') | list | length > 0
+    fail_msg: >-
+      dns_ddns_enabled is true but no entry in dns_authoritative_zones has
+      dynamic: true. DDNS with nothing to update is not a useful
+      configuration.
+  when: dns_ddns_enabled | bool
+
+- name: Assert dhcp_domain_name is set when this router's own dhcpd does DDNS
+  ansible.builtin.assert:
+    that:
+      - dhcp_domain_name | length > 0
+    fail_msg: >-
+      dns_ddns_enabled and manage_dhcp are both true, but dhcp_domain_name
+      is empty. dhcpd needs it to construct DDNS update names
+      (ddns-domainname).
+  when:
+    - dns_ddns_enabled | bool
+    - manage_dhcp | bool
+
+- name: Assert a DDNS secret was actually supplied when DDNS is enabled
+  ansible.builtin.assert:
+    that:
+      - dns_ddns_key_secret | length > 0
+    fail_msg: >-
+      dns_ddns_enabled is true but dns_ddns_key_secret is empty. Generate
+      one with `tsig-keygen -a hmac-sha256 {{ dns_ddns_key_name }}` and
+      supply it via --extra-vars, an Ansible Vault file, or your own
+      secret manager — never hard-code it in group_vars. Refusing to
+      render a DDNS config with no key material.
+  when: dns_ddns_enabled | bool
+  no_log: true
 
 - name: Assert lan_ifaces is a non-empty list
   ansible.builtin.assert:
