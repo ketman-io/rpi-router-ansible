@@ -108,5 +108,19 @@ table ip nat {
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
         oifname "{{ wan_iface }}" masquerade
+{% if router_mode == 'dns_redirect' %}
+        # Masquerade the redirected flow too, not just DNAT it — proven
+        # live to be necessary when dns_redirect_target sits on the SAME
+        # subnet as the LAN bridge (the ordinary case: a dedicated DNS host
+        # on the LAN, not behind a separate hop). Without this, the target
+        # sees the client's real source address, replies to the client
+        # DIRECTLY over the LAN (same subnet, no reason to route back
+        # through this router), and the client discards that reply as
+        # coming from an address it never queried. Masquerading forces the
+        # reply back through this router, where conntrack un-DNATs and
+        # un-SNATs it correctly before it reaches the client.
+        ip daddr {{ dns_redirect_target }} udp dport 53 masquerade
+        ip daddr {{ dns_redirect_target }} tcp dport 53 masquerade
+{% endif %}
     }
 }
