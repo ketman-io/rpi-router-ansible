@@ -17,3 +17,12 @@
   ansible.builtin.systemd_service:
     name: isc-dhcp-server
     state: restarted
+
+# Targeted reload, not a full `systemctl restart NetworkManager` — that
+# would briefly tear down every managed connection on a host that may well
+# be reached over one of them. `dns-rc` specifically re-reads NetworkManager
+# .conf's [main] dns= setting and re-applies DNS-management policy without
+# touching connection state at all.
+- name: reload NetworkManager
+  ansible.builtin.command: nmcli general reload dns-rc
+  changed_when: true

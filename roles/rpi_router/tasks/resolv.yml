@@ -1,9 +1,28 @@
 ---
 # The router's OWN DNS resolution — not what it serves to clients, but what
 # it uses itself for outbound lookups (apt, NTP hostnames, etc). One
-# intentional path, no hidden alternate one: systemd-resolved is disabled
-# and DNS-over-WAN-DHCP is ignored, so /etc/resolv.conf always says exactly
-# what this role decided it should say.
+# intentional path, no hidden alternate one.
+#
+# The root cause of a real idempotence bug, found running this live against
+# piroute25: setting ipv4.ignore-auto-dns on the WAN connection is not
+# enough. NetworkManager's default DNS plugin ("dns=" unset in
+# NetworkManager.conf, which means "default") still assembles
+# /etc/resolv.conf itself from EVERY active connection's effective DNS
+# settings, and IPv6 router advertisements on the WAN interface — a
+# separate setting, ipv6.ignore-auto-dns, never touched by the earlier
+# version of this role — kept injecting an IPv6 nameserver from the ISP
+# router into that assembly. The result: NM regenerated /etc/resolv.conf
+# out from under this role's own copy task, and every subsequent converge
+# reported it changed again, correctly, because it genuinely differed from
+# what NM had just rewritten it to.
+#
+# Chasing every per-connection ignore-auto-dns flag (WAN's IPv4 one, WAN's
+# IPv6 one, the bridge's, each slave's) is exactly the whack-a-mole this
+# role should not encode. The actual fix is at the source: tell
+# NetworkManager not to manage /etc/resolv.conf at all. Once dns=none is
+# set, this role's own copy task is the file's only writer, on this host,
+# ever — which is the point of a role that manages DNS resolution in the
+# first place.
 
 - name: Disable systemd-resolved if present
   ansible.builtin.systemd_service:
@@ -14,9 +33,17 @@
   register: rpi_router_resolved_disabled
   changed_when: rpi_router_resolved_disabled is not failed and rpi_router_resolved_disabled.changed | default(false)
 
-- name: Stop NetworkManager from taking DNS settings from WAN's DHCP lease
-  ansible.builtin.command: nmcli connection modify wan ipv4.ignore-auto-dns yes
-  changed_when: true
+- name: Stop NetworkManager from writing /etc/resolv.conf itself
+  community.general.ini_file:
+    path: /etc/NetworkManager/NetworkManager.conf
+    section: main
+    option: dns
+    value: "none"
+    mode: "0644"
+  notify: reload NetworkManager
+
+- name: Apply the NetworkManager DNS-management change now
+  ansible.builtin.meta: flush_handlers
 
 - name: Determine this router's own resolver
   ansible.builtin.set_fact:

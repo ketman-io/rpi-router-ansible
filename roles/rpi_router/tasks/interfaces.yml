@@ -7,6 +7,16 @@
 # physical LAN interfaces are bridge slaves with no IP configuration of
 # their own — attaching an address to a slave interface directly is a classic
 # way to end up with traffic silently leaving by the wrong path.
+#
+# Every "bring up" / "modify" task below reads the device's or connection's
+# actual live state first and only acts when it disagrees with desired
+# state. Proven live against piroute25 that this matters: a bare
+# `nmcli connection up X` run unconditionally reports changed on every
+# single converge — nmcli itself has no "already exactly this" concept for
+# a raw command task to inherit, so a role that wants real idempotence has
+# to ask first, not just re-assert every time and call the tool's own
+#"already active" no-op good enough. It performs the same activation
+# either way; only the reported change state differs.
 
 - name: Install NetworkManager if missing
   ansible.builtin.apt:
@@ -35,8 +45,15 @@
   register: rpi_router_wan_created
   changed_when: true
 
+- name: Check which connection is currently active on the WAN device
+  ansible.builtin.command: "nmcli -t -f GENERAL.CONNECTION device show {{ wan_iface }}"
+  register: rpi_router_wan_active
+  changed_when: false
+  failed_when: false
+
 - name: Bring up the WAN connection
   ansible.builtin.command: nmcli connection up wan
+  when: rpi_router_wan_active.stdout | trim != 'GENERAL.CONNECTION:wan'
   changed_when: true
 
 # --- LAN bridge ---
@@ -49,14 +66,25 @@
   when: lan_bridge not in rpi_router_nm_connections.stdout_lines
   changed_when: true
 
+- name: Read the LAN bridge connection's current settings
+  ansible.builtin.command: >-
+    nmcli -t -f ipv4.method,ipv4.addresses,bridge.stp connection show {{ lan_bridge }}
+  register: rpi_router_bridge_settings
+  changed_when: false
+  when: lan_bridge in rpi_router_nm_connections.stdout_lines
+
 - name: Ensure the LAN bridge address matches desired state
   ansible.builtin.command: >-
     nmcli connection modify {{ lan_bridge }} ipv4.method manual
     ipv4.addresses {{ lan_ip }}/{{ lan_prefix }} ipv4.gateway ""
     bridge.stp {{ 'yes' if lan_bridge_stp | bool else 'no' }}
-  register: rpi_router_bridge_modify
+  when:
+    - lan_bridge in rpi_router_nm_connections.stdout_lines
+    - >-
+      'ipv4.method:manual' not in rpi_router_bridge_settings.stdout_lines or
+      ('ipv4.addresses:' ~ lan_ip ~ '/' ~ lan_prefix) not in rpi_router_bridge_settings.stdout_lines or
+      ('bridge.stp:' ~ ('yes' if lan_bridge_stp | bool else 'no')) not in rpi_router_bridge_settings.stdout_lines
   changed_when: true
-  when: lan_bridge in rpi_router_nm_connections.stdout_lines
 
 - name: Create a bridge-slave connection profile for each LAN interface
   ansible.builtin.command: >-
@@ -67,13 +95,28 @@
   when: (lan_bridge ~ '-' ~ item) not in rpi_router_nm_connections.stdout_lines
   changed_when: true
 
+- name: Check which connection is currently active on the LAN bridge device
+  ansible.builtin.command: "nmcli -t -f GENERAL.CONNECTION device show {{ lan_bridge }}"
+  register: rpi_router_bridge_active
+  changed_when: false
+  failed_when: false
+
 - name: Bring up the LAN bridge
   ansible.builtin.command: nmcli connection up {{ lan_bridge }}
+  when: rpi_router_bridge_active.stdout | trim != ('GENERAL.CONNECTION:' ~ lan_bridge)
   changed_when: true
 
-- name: Bring up each bridge-slave connection
-  ansible.builtin.command: nmcli connection up {{ lan_bridge }}-{{ item }}
+- name: Check which connection is currently active on each LAN interface
+  ansible.builtin.command: "nmcli -t -f GENERAL.CONNECTION device show {{ item }}"
   loop: "{{ lan_ifaces }}"
+  register: rpi_router_slave_active
+  changed_when: false
+  failed_when: false
+
+- name: Bring up each bridge-slave connection
+  ansible.builtin.command: "nmcli connection up {{ lan_bridge }}-{{ item.item }}"
+  loop: "{{ rpi_router_slave_active.results }}"
+  when: item.stdout | trim != ('GENERAL.CONNECTION:' ~ lan_bridge ~ '-' ~ item.item)
   register: rpi_router_slave_up
   changed_when: rpi_router_slave_up.rc == 0
   failed_when: >-
